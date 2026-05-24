@@ -45,6 +45,27 @@ kcs . -e vendor
 
 ---
 
+## Exclusion Rules (.kcsignore)
+
+If a `.kcsignore` file exists in the directory where `kcs` is executed, it will automatically load and apply its exclusion patterns.
+
+- Write one path pattern per line.
+- Empty lines and lines starting with `#` (comments) are ignored.
+- Patterns behave identically to the `-e` / `--exclude` command-line argument.
+
+Example `.kcsignore`:
+
+```text
+# Exclude vendor dependencies
+vendor/
+node_modules/
+
+# Exclude generated code
+*.gen.c
+```
+
+---
+
 ## Build
 
 `kcs` is written in Bash and requires no native compilation. It can be executed directly from the source directory or symlinked to your `PATH`.
