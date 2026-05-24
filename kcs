@@ -102,6 +102,23 @@ get_file_type() {
     esac
 }
 
+# Validates that filenames use kebab-case instead of snake_case.
+# Exception is made for files representing class names.
+# @param file_path Path to the file.
+# @return 0 on success, fails otherwise.
+validate_filename() {
+    local file_path="$1"
+    local filename
+    filename=$(basename "$file_path")
+    local name="${filename%.*}"
+    if [[ "$name" =~ [A-Z] ]]; then
+        return 0
+    fi
+    if [[ "$name" == *"_"* ]]; then
+        fail "$file_path: Filename must use hyphens '-' instead of underscores '_' to separate words."
+    fi
+}
+
 # Validates whitespace, indentation, and blank lines.
 # @param file_path Path to the file.
 # @return 0 on success, fails otherwise.
@@ -599,6 +616,91 @@ collect_artifacts() {
     done
 }
 
+# Ensures no numbered or ornamented outputs.
+# @param file_path Path to the file.
+# @param ftype File type identified.
+# @return 0 on success, fails otherwise.
+validate_no_numbered_or_ornamented_outputs() {
+    local file_path="$1"
+    local ftype="$2"
+    local bad_line
+    local AWK_HELPERS='
+        function has_ornament(str) {
+            if (str ~ /(===|---|[\*]{3}|___|###|[\+]{3}|~~~)/) return 1
+            if (str ~ /(==|--|[\*]{2}|__|##|[\+]{2}|~~)[[:space:]]*[a-zA-Z0-9_[:space:]]+[[:space:]]*(==|--|[\*]{2}|__|##|[\+]{2}|~~)/) return 1
+            if (str ~ /(->|=>|-->|==>|<-|<=|<->|<==>)/) return 1
+            gsub(/\xc2\xa9/, "", str)
+            if (str ~ /[^\x00-\x7F]/) return 1
+            return 0
+        }
+        function check_line_for_ornaments(line,    n, parts, i) {
+            n = split(line, parts, /[\x27\x22\x60]/)
+            for (i = 2; i <= n; i += 2) {
+                if (has_ornament(parts[i])) return 1
+            }
+            return 0
+        }
+    '
+    case "$ftype" in
+        markdown)
+            bad_line=$(awk '
+                '"$AWK_HELPERS"'
+                /^```/ { in_fence = !in_fence; next }
+                in_fence { next }
+                /^[[:space:]]*#+[[:space:]]+/ {
+                    heading = $0
+                    sub(/^[[:space:]]*#+[[:space:]]+/, "", heading)
+                    if (heading ~ /^[0-9]+[\.\)]/) { print NR; exit }
+                    if (has_ornament(heading)) { print NR; exit }
+                }
+            ' "$file_path")
+            if [ -n "$bad_line" ]; then
+                fail "$file_path:$bad_line Headings must not be numbered or contain ornaments."
+            fi
+            ;;
+        shell)
+            bad_line=$(awk '
+                '"$AWK_HELPERS"'
+                /^[[:space:]]*#/ {
+                    comment = $0
+                    sub(/^[[:space:]]*#/, "", comment)
+                    if (has_ornament(comment)) { print NR; exit }
+                }
+                /^[[:space:]]*(echo|printf|log_[a-z0-9_]+|kc_log_[a-z0-9_]+)[[:space:]]+/ {
+                    if ($0 ~ /[\x27\x22\x60][[:space:]]*(\\[a-zA-Z])*[[:space:]]*[0-9]+[\.\)]/) { print NR; exit }
+                    if (check_line_for_ornaments($0)) { print NR; exit }
+                }
+            ' "$file_path")
+            if [ -n "$bad_line" ]; then
+                fail "$file_path:$bad_line Print/echo statements and comments must not contain numbered messages or ornaments."
+            fi
+            ;;
+        c|php)
+            bad_line=$(awk '
+                '"$AWK_HELPERS"'
+                /^[[:space:]]*(\*|\/\*|\*\/|\/\/)/ {
+                    comment = $0
+                    sub(/^[[:space:]]*(\/\*|\*\/|\/\/)/, "", comment)
+                    sub(/^[[:space:]]*\*/, "", comment)
+                    if (has_ornament(comment)) { print NR; exit }
+                }
+                /(printf|fprintf|sprintf|snprintf|kc_log|log_[a-z0-9_]+|echo)[[:space:]]*\(/ {
+                    if ($0 ~ /\([^\x22]*\x22[[:space:]]*(\\[a-zA-Z])*[[:space:]]*[0-9]+[\.\)]/) { print NR; exit }
+                    if (check_line_for_ornaments($0)) { print NR; exit }
+                }
+                /^[[:space:]]*echo[[:space:]]+/ {
+                    if ($0 ~ /[\x27\x22\x60][[:space:]]*(\\[a-zA-Z])*[[:space:]]*[0-9]+[\.\)]/) { print NR; exit }
+                    if (check_line_for_ornaments($0)) { print NR; exit }
+                }
+            ' "$file_path")
+            if [ -n "$bad_line" ]; then
+                fail "$file_path:$bad_line C/PHP prints/logs and comments must not contain numbered messages or ornaments."
+            fi
+            ;;
+    esac
+    pass "$file_path: Numbered and ornamented output rules verified."
+}
+
 # Main entry point for the validator lifecycle.
 # @param args List of files or directories to validate.
 # @return 0 on success.
@@ -616,11 +718,13 @@ run_validator() {
         if [[ "$(basename "$artifact")" == "CHANGELOG.md" ]]; then
             continue
         fi
+        validate_filename "$artifact"
         validate_whitespace_and_limits "$artifact"
         validate_no_internal_comments "$artifact" "$ftype"
         validate_docblock_spacing "$artifact" "$ftype"
         validate_function_docblocks "$artifact" "$ftype"
         validate_docblock_format "$artifact"
+        validate_no_numbered_or_ornamented_outputs "$artifact" "$ftype"
         case "$ftype" in
             shell)
                 validate_shell_rules "$artifact"
