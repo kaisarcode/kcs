@@ -1,6 +1,9 @@
 #!/bin/bash
 # kcs - KaisarCode Standards Validator
 # Summary: Validates KaisarCode files against formatting and standards rules.
+# Author:  KaisarCode
+# Website: https://kaisarcode.com
+# License: https://www.gnu.org/licenses/gpl-3.0.html
 
 set -e
 set -o pipefail
@@ -699,6 +702,49 @@ validate_no_numbered_or_ornamented_outputs() {
     pass "$file_path: Numbered and ornamented output rules verified."
 }
 
+# Validates that files begin with the KaisarCode header block.
+# @param file_path Path to the file.
+# @param ftype File type identified.
+# @return 0 on success, fails otherwise.
+kc_validate_header() {
+    local file_path="$1"
+    local ftype="$2"
+    local bad_line
+    case "$ftype" in
+        shell)
+            bad_line=$(awk '
+                NR == 1 && /^#!/ { next }
+                NR == 2 && /^# / { next }
+                NR == 3 && /^# Summary:/ { next }
+                NR == 4 && /^# Author:/ { next }
+                NR == 5 && /^# Website:/ { next }
+                NR == 6 && /^# License:/ { next }
+                NR >= 2 && NR <= 6 { print NR; exit }
+            ' "$file_path" || true)
+            if [ -n "$bad_line" ]; then
+                fail "$file_path:$bad_line Missing or malformed KaisarCode header."
+            fi
+            ;;
+        c|php)
+            bad_line=$(awk '
+                NR == 1 && /^[[:space:]]*\/\*\*/ { next }
+                NR == 2 && /^ \*/ { next }
+                NR == 3 && /^ \* Summary:/ { next }
+                NR == 4 && /^ \*$/ { next }
+                NR == 5 && /^ \* Author:/ { next }
+                NR == 6 && /^ \* Website:/ { next }
+                NR == 7 && /^ \* License:/ { next }
+                NR == 8 && /^ \*\// { next }
+                NR >= 1 && NR <= 8 { print NR; exit }
+            ' "$file_path" || true)
+            if [ -n "$bad_line" ]; then
+                fail "$file_path:$bad_line Missing or malformed KaisarCode header."
+            fi
+            ;;
+    esac
+    pass "$file_path: KaisarCode header verified."
+}
+
 # Main entry point for the validator lifecycle.
 # @param args List of files or directories to validate.
 # @return 0 on success.
@@ -717,6 +763,7 @@ run_validator() {
             continue
         fi
         validate_filename "$artifact"
+        kc_validate_header "$artifact" "$ftype"
         validate_whitespace_and_limits "$artifact"
         validate_no_internal_comments "$artifact" "$ftype"
         validate_docblock_spacing "$artifact" "$ftype"
