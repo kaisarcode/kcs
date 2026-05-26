@@ -819,7 +819,7 @@ main() {
         shift
     done
 
-    [ "$#" -gt 0 ] || kc_kcs_fail "Missing file or directory." || return 1
+    [ "$#" -gt 0 ] || set -- "."
     export KC_KCS_FORCE_TYPE="$force_type"
     KC_KCS_EXCLUDES=("${excludes[@]}")
     run_validator "$@"
