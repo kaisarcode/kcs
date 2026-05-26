@@ -719,6 +719,20 @@ validate_no_numbered_or_ornamented_outputs() {
     pass "$file_path: Numbered and ornamented output rules verified."
 }
 
+# Validates that the em dash character is not used.
+# Hyphen "-" must be used instead.
+# @param file_path Path to the file.
+# @return 0 on success, fails otherwise.
+validate_no_em_dash() {
+    local file_path="$1"
+    local bad_line
+    bad_line=$(grep -n $'\xe2\x80\x94' "$file_path" | head -n 1 | cut -d: -f1 || true)
+    if [ -n "$bad_line" ]; then
+        fail "$file_path:$bad_line Em dash character is forbidden; use hyphen \"-\" instead."
+    fi
+    pass "$file_path: No em dash characters."
+}
+
 # Validates that files begin with the KaisarCode header block.
 # @param file_path Path to the file.
 # @param ftype File type identified.
@@ -780,6 +794,7 @@ run_validator() {
             continue
         fi
         validate_filename "$artifact"
+        validate_no_em_dash "$artifact"
         kc_validate_header "$artifact" "$ftype"
         validate_whitespace_and_limits "$artifact"
         validate_no_internal_comments "$artifact" "$ftype"

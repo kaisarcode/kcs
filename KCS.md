@@ -18,6 +18,7 @@ These standards are natively enforced by the `kcs` validation tool.
 - **Cleanliness:** Remove all debug logs, markers, and temporary instrumentation before committing.
 - **No Numbered Outputs:** Diagnostic messages, prints, or logs (via `echo`, `printf`, `log_` functions, etc.) must not be prefixed with step numbers (e.g., `1.`, `2)`).
 - **No Ornamented Outputs:** Echos, prints, or logs must not contain visual decorations or symbolic elements (such as horizontal separator dashes `---`, equals lines `===`, arrow symbols `->` or `=>`, titles formatted like `=== TITLE ===`, or non-ASCII characters like emojis and special shapes).
+- **No Em Dash:** The em dash character "—" is forbidden in all files. Use the standard hyphen "-" character instead.
 
 ## Code Organization
 
