@@ -678,12 +678,10 @@ validate_no_numbered_or_ornamented_outputs() {
         c|php)
             bad_line=$(awk '
                 '"$AWK_HELPERS"'
-                /^[[:space:]]*(\*|\/\*|\*\/|\/\/)/ {
-                    comment = $0
-                    sub(/^[[:space:]]*(\/\*|\*\/|\/\/)/, "", comment)
-                    sub(/^[[:space:]]*\*/, "", comment)
-                    if (has_ornament(comment)) { print NR; exit }
-                }
+                /^[[:space:]]*\/\*/ { in_comment = 1; comment = $0; sub(/^[[:space:]]*\/\*/, "", comment); if (has_ornament(comment)) { print NR; exit } }
+                /^[[:space:]]*\*\// { in_comment = 0; comment = $0; sub(/^[[:space:]]*\*\//, "", comment); if (has_ornament(comment)) { print NR; exit } }
+                in_comment && /^[[:space:]]*\*/ { comment = $0; sub(/^[[:space:]]*\*/, "", comment); if (has_ornament(comment)) { print NR; exit } }
+                /^[[:space:]]*\/\// { comment = $0; sub(/^[[:space:]]*\/\//, "", comment); if (has_ornament(comment)) { print NR; exit } }
                 /(printf|fprintf|sprintf|snprintf|kc_log|log_[a-z0-9_]+|echo)[[:space:]]*\(/ {
                     if ($0 ~ /\([^\x22]*\x22[[:space:]]*(\\[a-zA-Z])*[[:space:]]*[0-9]+[\.\)]/) { print NR; exit }
                     if (check_line_for_ornaments($0)) { print NR; exit }
