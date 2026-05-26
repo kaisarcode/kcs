@@ -392,19 +392,20 @@ validate_no_internal_comments() {
                     print NR; exit
                 }
                 if ($0 ~ /@return/) seen_return = 1
+                if ($0 !~ /@param/ && $0 !~ /@return/ && $0 !~ "^"h" (Summary:|Author:|Website:|License:|Email:|©)" && $0 ~ "^"h" [A-Za-z]") seen_summary = 1
                 in_docblock = 1; next
             }
             index($0, s h) { print NR; exit }
-            /^[[:space:]]*$/ { in_docblock = 0; seen_return = 0 }
+            /^[[:space:]]*$/ { in_docblock = 0; seen_return = 0; seen_summary = 0 }
             /^[a-z_]+[ ]*\(\)/ {
-                if (in_docblock && !seen_return) { print NR; exit }
-                in_docblock = 0; seen_return = 0
+                if (in_docblock && (!seen_return || !seen_summary)) { print NR; exit }
+                in_docblock = 0; seen_return = 0; seen_summary = 0
             }
             in_docblock {
                 print NR; exit
             }
         ' "$file_path")
-        [ -n "$bad_line" ] && fail "$file_path:$bad_line Forbidden internal comment or missing @return."
+        [ -n "$bad_line" ] && fail "$file_path:$bad_line Forbidden internal comment, missing summary, or missing @return."
     elif [ "$ftype" = "c" ]; then
         local bad_line
         bad_line=$(awk -v sl="/" -v as="*" '
@@ -454,17 +455,18 @@ validate_no_internal_comments() {
             }
             scan ~ /^[[:space:]]*\/\*\*/ { in_docblock = 1 }
             in_docblock && /@return/ { seen_return = 1 }
+            in_docblock && !/@param/ && !/@return/ && !/\* (Summary:|Author:|Website:|License:|Email:|©)/ && /\* [A-Za-z]/ { seen_summary = 1 }
             in_docblock && index(scan, as sl) {
                 closing_line = NR
                 next
             }
             closing_line && NR == closing_line + 1 {
                 is_func = ($0 ~ /^[A-Za-z_][A-Za-z0-9_[:space:]\*]*\([^\)]*[;\{]?/ && $0 !~ /typedef/)
-                if (!seen_return && is_func) { print NR - 1; exit }
-                in_docblock = 0; seen_return = 0; closing_line = 0
+                if ((!seen_return || !seen_summary) && is_func) { print NR - 1; exit }
+                in_docblock = 0; seen_return = 0; seen_summary = 0; closing_line = 0
             }
         ' "$file_path")
-        [ -n "$bad_line" ] && fail "$file_path:$bad_line Forbidden internal comment or missing @return."
+        [ -n "$bad_line" ] && fail "$file_path:$bad_line Forbidden internal comment, missing summary, or missing @return."
     fi
     pass "$file_path: No forbidden internal comments."
 }
@@ -483,26 +485,31 @@ validate_function_docblocks() {
                 in_docblock = 1
                 if ($0 ~ /@return/) {
                     seen_return = 1
+                } else if ($0 !~ /@param/ && $0 !~ /@return/ && $0 !~ /# (Summary:|Author:|Website:|License:|Email:|©)/ && $0 ~ /# [A-Za-z]/) {
+                    seen_summary = 1
                 }
                 next
             }
             /^[[:space:]]*$/ {
                 in_docblock = 0
                 seen_return = 0
+                seen_summary = 0
                 next
             }
             /^[a-z_][a-z0-9_]*[[:space:]]*\(\)[[:space:]]*\{/ {
-                if (!in_docblock || !seen_return) { print NR; exit }
+                if (!in_docblock || !seen_return || !seen_summary) { print NR; exit }
                 in_docblock = 0
                 seen_return = 0
+                seen_summary = 0
                 next
             }
             {
                 in_docblock = 0
                 seen_return = 0
+                seen_summary = 0
             }
         ' "$file_path")
-        [ -n "$bad_line" ] && fail "$file_path:$bad_line Missing function DocBlock."
+        [ -n "$bad_line" ] && fail "$file_path:$bad_line Missing function DocBlock or summary."
     elif [ "$ftype" = "c" ] || [ "$ftype" = "php" ]; then
         bad_line=$(awk '
             function is_control_line(line) {
@@ -528,12 +535,16 @@ validate_function_docblocks() {
                 in_docblock = 1
                 if ($0 ~ /@return/) {
                     seen_return = 1
+                } else if ($0 !~ /@param/ && $0 !~ /@return/ && $0 !~ /\* (Summary:|Author:|Website:|License:|Email:|©)/ && $0 ~ /\* [A-Za-z]/) {
+                    seen_summary = 1
                 }
                 next
             }
             in_docblock {
                 if ($0 ~ /@return/) {
                     seen_return = 1
+                } else if ($0 !~ /@param/ && $0 !~ /@return/ && $0 !~ /\* (Summary:|Author:|Website:|License:|Email:|©)/ && $0 ~ /\* [A-Za-z]/) {
+                    seen_summary = 1
                 }
                 if ($0 ~ /\*\//) {
                     in_docblock = 0
@@ -544,14 +555,16 @@ validate_function_docblocks() {
             /^[[:space:]]*$/ {
                 docblock_ready = 0
                 seen_return = 0
+                seen_summary = 0
                 next
             }
             /^[[:space:]]*#/ { next }
             pending_function && /^[[:space:]]*\{/ {
-                if (!docblock_ready || !seen_return) { print pending_line; exit }
+                if (!docblock_ready || !seen_return || !seen_summary) { print pending_line; exit }
                 pending_function = 0
                 docblock_ready = 0
                 seen_return = 0
+                seen_summary = 0
                 next
             }
             pending_function {
@@ -559,21 +572,24 @@ validate_function_docblocks() {
                     pending_function = 0
                     docblock_ready = 0
                     seen_return = 0
+                    seen_summary = 0
                     next
                 }
                 if ($0 ~ /\)[[:space:]]*\{/) {
-                    if (!docblock_ready || !seen_return) { print pending_line; exit }
+                    if (!docblock_ready || !seen_return || !seen_summary) { print pending_line; exit }
                     pending_function = 0
                     docblock_ready = 0
                     seen_return = 0
+                    seen_summary = 0
                     next
                 }
                 next
             }
             is_function_single($0) {
-                if (!docblock_ready || !seen_return) { print NR; exit }
+                if (!docblock_ready || !seen_return || !seen_summary) { print NR; exit }
                 docblock_ready = 0
                 seen_return = 0
+                seen_summary = 0
                 next
             }
             is_function_start($0) {
@@ -589,9 +605,10 @@ validate_function_docblocks() {
             {
                 docblock_ready = 0
                 seen_return = 0
+                seen_summary = 0
             }
         ' "$file_path")
-        [ -n "$bad_line" ] && fail "$file_path:$bad_line Missing function DocBlock or @return."
+        [ -n "$bad_line" ] && fail "$file_path:$bad_line Missing function DocBlock, summary, or @return."
     fi
     pass "$file_path: Function DocBlocks verified."
 }
