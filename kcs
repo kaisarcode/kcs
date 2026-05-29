@@ -647,17 +647,32 @@ validate_no_numbered_or_ornamented_outputs() {
     local AWK_HELPERS='
         function has_ornament(str) {
             if (str ~ /(===|---|[\*]{3}|___|###|[\+]{3}|~~~)/) return 1
-            if (str ~ /(==|--|[\*]{2}|__|##|[\+]{2}|~~)[[:space:]]*[a-zA-Z0-9_[:space:]]+[[:space:]]*(==|--|[\*]{2}|__|##|[\+]{2}|~~)/) return 1
+            if (str ~ /(==|--|[\*]{2}|__|##|[\+]{2}|~~)[[:space:]]+[a-zA-Z0-9_[:space:]]+[[:space:]]+(==|--|[\*]{2}|__|##|[\+]{2}|~~)/) return 1
             if (str ~ /(->|=>|-->|==>|<-|<=|<->|<==>)/) return 1
             gsub(/\xc2\xa9/, "", str)
             if (str ~ /[^\x00-\x7F]/) return 1
             return 0
+        }
+        function first_quoted_part(line,    n, parts) {
+            n = split(line, parts, /[\x27\x22\x60]/)
+            if (n >= 2) return parts[2]
+            return ""
+        }
+        function has_numbered_prefix(str) {
+            return str ~ /^[[:space:]]*(\\[a-zA-Z])*[[:space:]]*[0-9]+[\.\)]/
         }
         function check_line_for_ornaments(line,    n, parts, i) {
             n = split(line, parts, /[\x27\x22\x60]/)
             for (i = 2; i <= n; i += 2) {
                 if (has_ornament(parts[i])) return 1
             }
+            return 0
+        }
+        function check_first_quoted_part(line,    text) {
+            text = first_quoted_part(line)
+            if (text == "") return 0
+            if (has_numbered_prefix(text)) return 1
+            if (has_ornament(text)) return 1
             return 0
         }
     '
@@ -687,8 +702,7 @@ validate_no_numbered_or_ornamented_outputs() {
                     if (has_ornament(comment)) { print NR; exit }
                 }
                 /^[[:space:]]*(echo|printf|log_[a-z0-9_]+|kc_log_[a-z0-9_]+)[[:space:]]+/ {
-                    if ($0 ~ /[\x27\x22\x60][[:space:]]*(\\[a-zA-Z])*[[:space:]]*[0-9]+[\.\)]/) { print NR; exit }
-                    if (check_line_for_ornaments($0)) { print NR; exit }
+                    if (check_first_quoted_part($0)) { print NR; exit }
                 }
             ' "$file_path")
             if [ -n "$bad_line" ]; then
@@ -703,12 +717,10 @@ validate_no_numbered_or_ornamented_outputs() {
                 in_comment && /^[[:space:]]*\*/ { comment = $0; sub(/^[[:space:]]*\*/, "", comment); if (has_ornament(comment)) { print NR; exit } }
                 /^[[:space:]]*\/\// { comment = $0; sub(/^[[:space:]]*\/\//, "", comment); if (has_ornament(comment)) { print NR; exit } }
                 /(printf|fprintf|sprintf|snprintf|kc_log|log_[a-z0-9_]+|echo)[[:space:]]*\(/ {
-                    if ($0 ~ /\([^\x22]*\x22[[:space:]]*(\\[a-zA-Z])*[[:space:]]*[0-9]+[\.\)]/) { print NR; exit }
-                    if (check_line_for_ornaments($0)) { print NR; exit }
+                    if (check_first_quoted_part($0)) { print NR; exit }
                 }
                 /^[[:space:]]*echo[[:space:]]+/ {
-                    if ($0 ~ /[\x27\x22\x60][[:space:]]*(\\[a-zA-Z])*[[:space:]]*[0-9]+[\.\)]/) { print NR; exit }
-                    if (check_line_for_ornaments($0)) { print NR; exit }
+                    if (check_first_quoted_part($0)) { print NR; exit }
                 }
             ' "$file_path")
             if [ -n "$bad_line" ]; then

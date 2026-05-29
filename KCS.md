@@ -18,13 +18,13 @@ These standards are natively enforced by the `kcs` validation tool.
 - **Cleanliness:** Remove all debug logs, markers, and temporary instrumentation before committing.
 - **No Numbered Outputs:** Diagnostic messages, prints, or logs (via `echo`, `printf`, `log_` functions, etc.) must not be prefixed with step numbers (e.g., `1.`, `2)`).
 - **No Ornamented Outputs:** Echos, prints, or logs must not contain visual decorations or symbolic elements (such as horizontal separator dashes `---`, equals lines `===`, arrow symbols `->` or `=>`, titles formatted like `=== TITLE ===`, or non-ASCII characters like emojis and special shapes).
-- **No Em Dash:** The em dash character "—" is forbidden in all files. Use the standard hyphen "-" character instead.
+- **No Em Dash:** The em dash character is forbidden in all files. Use the standard hyphen "-" character instead.
 
 ## Code Organization
 
 - **Functions:** Keep all executable logic encapsulated inside functions.
 - **Shell Scripts:** The main body of a shell script should only delegate to functions (e.g., calling `main "$@"`).
-- **Filenames:** Default source filenames to one lowercase word. If a filename contains multiple words, they must be separated with a hyphen (`-`) and only a hyphen—underscores (`_`) are strictly forbidden. The only exception to this rule is for files representing class names. Shell CLI binaries should use kebab-case.
+- **Filenames:** Default source filenames to one lowercase word. If a filename contains multiple words, they must be separated with a hyphen (`-`) and only a hyphen. Underscores (`_`) are strictly forbidden. The only exception to this rule is for files representing class names. Shell CLI binaries should use kebab-case.
 
 ## Comment & Doc Policy
 
@@ -38,7 +38,7 @@ These standards are natively enforced by the `kcs` validation tool.
 - **Syntax:** Documentation syntax is language-specific:
     - **C/C++ & PHP:** `/** ... */`
     - **Shell:** `# ` directly above the function
-- **Role:** Documentation is structural metadata detailing inputs, outputs, and usage—not narrative explanation.
+- **Role:** Documentation is structural metadata detailing inputs, outputs, and usage, not narrative explanation.
 
 ## C/C++ Rules
 
