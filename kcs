@@ -779,15 +779,17 @@ kc_validate_header() {
             ;;
         c|php)
             bad_line=$(awk '
-                NR == 1 && /^[[:space:]]*\/\*\*/ { next }
-                NR == 2 && /^ \*/ { next }
-                NR == 3 && /^ \* Summary:/ { next }
-                NR == 4 && /^ \*$/ { next }
-                NR == 5 && /^ \* Author:/ { next }
-                NR == 6 && /^ \* Website:/ { next }
-                NR == 7 && /^ \* License:/ { next }
-                NR == 8 && /^ \*\// { next }
-                NR >= 1 && NR <= 8 { print NR; exit }
+                BEGIN { in_header = 1 }
+                NR == 1 { if ($0 !~ /^[[:space:]]*\/\*\*/) { print NR; exit } next }
+                NR == 2 { if ($0 !~ /^ \*/) { print NR; exit } next }
+                NR == 3 { if ($0 !~ /^ \* Summary:/) { print NR; exit } next }
+                NR == 4 { if ($0 !~ /^ \*$/) { print NR; exit } next }
+                NR == 5 { if ($0 !~ /^ \* Author:/) { print NR; exit } next }
+                NR == 6 { if ($0 !~ /^ \* Website:/) { print NR; exit } next }
+                NR == 7 { if ($0 !~ /^ \* License:/) { print NR; exit } next }
+                /^[[:space:]]*\*\// && NR >= 8 { in_header = 0; next }
+                in_header && NR >= 8 && $0 !~ /^ \*/ { print NR; exit }
+                END { if (in_header) print "end-of-file" }
             ' "$file_path" || true)
             if [ -n "$bad_line" ]; then
                 fail "$file_path:$bad_line Missing or malformed KaisarCode header."
