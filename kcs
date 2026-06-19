@@ -397,7 +397,7 @@ validate_no_internal_comments() {
             }
             index($0, s h) { print NR; exit }
             /^[[:space:]]*$/ { in_docblock = 0; seen_return = 0; seen_summary = 0 }
-            /^[a-z_]+[ ]*\(\)/ {
+            /^[a-z_][a-z0-9_]*[ ]*\(\)/ {
                 if (in_docblock && (!seen_return || !seen_summary)) { print NR; exit }
                 in_docblock = 0; seen_return = 0; seen_summary = 0
             }
