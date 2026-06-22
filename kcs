@@ -471,6 +471,44 @@ validate_no_internal_comments() {
     pass "$file_path: No forbidden internal comments."
 }
 
+
+# Rejects stacked DocBlocks before one code item.
+# @param file_path Path to the file.
+# @param ftype File type identified.
+# @return 0 on success.
+validate_no_duplicate_docblocks() {
+    local file_path="$1"
+    local ftype="$2"
+    local bad_line
+    if [ "$ftype" = "c" ] || [ "$ftype" = "php" ]; then
+        bad_line=$(awk '
+            /^[[:space:]]*\/\*\*/ {
+                if (docblock_ready) {
+                    print NR
+                    exit
+                }
+                in_docblock = 1
+                next
+            }
+            in_docblock {
+                if ($0 ~ /\*\//) {
+                    in_docblock = 0
+                    docblock_ready = 1
+                }
+                next
+            }
+            /^[[:space:]]*$/ {
+                next
+            }
+            {
+                docblock_ready = 0
+            }
+        ' "$file_path")
+        [ -n "$bad_line" ] && fail "$file_path:$bad_line Duplicate DocBlock."
+    fi
+    pass "$file_path: Duplicate DocBlocks verified."
+}
+
 # Requires a DocBlock immediately before each function definition.
 # @param file_path Path to the file.
 # @param ftype File type identified.
@@ -822,6 +860,7 @@ run_validator() {
         validate_whitespace_and_limits "$artifact"
         validate_no_internal_comments "$artifact" "$ftype"
         validate_docblock_spacing "$artifact" "$ftype"
+        validate_no_duplicate_docblocks "$artifact" "$ftype"
         validate_function_docblocks "$artifact" "$ftype"
         validate_docblock_format "$artifact"
         validate_no_numbered_or_ornamented_outputs "$artifact" "$ftype"
