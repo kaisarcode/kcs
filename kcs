@@ -352,7 +352,7 @@ validate_shell_rules() {
             fail "$file_path: Shell shebang must be /bin/sh or /bin/bash."
             ;;
     esac
-    if ! shellcheck -x "$file_path" >/dev/null 2>&1; then
+    if ! shellcheck -P SCRIPTDIR -x "$file_path" >/dev/null 2>&1; then
         fail "$file_path: shellcheck validation failed."
     fi
     pass "$file_path: Shell rules verified."
@@ -386,13 +386,16 @@ validate_no_internal_comments() {
     if [ "$ftype" = "shell" ]; then
         local bad_line
         bad_line=$(awk -v h="#" -v s=" " '
-            NR <= 20 { next }
+            NR == 1 && $0 ~ /^#!/ { next }
             $0 ~ "^"h {
-                if (!in_docblock && $0 !~ "^"h" ([*@]|Summary:|Author:|Website:|License:|Email:|©|"s"|[A-Z])") {
+                if (!in_docblock && $0 !~ "^"h" ([*@]|shellcheck|Summary:|Author:|Website:|License:|Email:|©|[a-z0-9_-]+ -|"s"|[A-Z])") {
                     print NR; exit
                 }
+                if ($0 ~ "^"h" shellcheck") {
+                    next
+                }
                 if ($0 ~ /@return/) seen_return = 1
-                if ($0 !~ /@param/ && $0 !~ /@return/ && $0 !~ "^"h" (Summary:|Author:|Website:|License:|Email:|©)" && $0 ~ "^"h" [A-Za-z]") seen_summary = 1
+                if ($0 !~ /@param/ && $0 !~ /@return/ && $0 !~ "^"h" (shellcheck|Summary:|Author:|Website:|License:|Email:|©|[a-z0-9_-]+ -)" && $0 ~ "^"h" [A-Za-z]") seen_summary = 1
                 in_docblock = 1; next
             }
             index($0, s h) { print NR; exit }
@@ -520,10 +523,13 @@ validate_function_docblocks() {
     if [ "$ftype" = "shell" ]; then
         bad_line=$(awk '
             /^[[:space:]]*# / {
+                if ($0 ~ /^[[:space:]]*# shellcheck/) {
+                    next
+                }
                 in_docblock = 1
                 if ($0 ~ /@return/) {
                     seen_return = 1
-                } else if ($0 !~ /@param/ && $0 !~ /@return/ && $0 !~ /# (Summary:|Author:|Website:|License:|Email:|©)/ && $0 ~ /# [A-Za-z]/) {
+                } else if ($0 !~ /@param/ && $0 !~ /@return/ && $0 !~ /# (shellcheck|Summary:|Author:|Website:|License:|Email:|©)/ && $0 ~ /# [A-Za-z]/) {
                     seen_summary = 1
                 }
                 next
