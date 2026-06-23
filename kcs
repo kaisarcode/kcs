@@ -386,7 +386,11 @@ validate_no_internal_comments() {
     if [ "$ftype" = "shell" ]; then
         local bad_line
         bad_line=$(awk -v h="#" -v s=" " '
+            BEGIN { in_header = 1 }
             NR == 1 && $0 ~ /^#!/ { next }
+            in_header && $0 ~ "^"h { next }
+            in_header && $0 ~ /^[[:space:]]*$/ { in_header = 0; next }
+            in_header { in_header = 0 }
             $0 ~ "^"h {
                 if (!in_docblock && $0 !~ "^"h" ([*@]|shellcheck|Summary:|Author:|Website:|License:|Email:|©|[a-z0-9_-]+ -|"s"|[A-Z])") {
                     print NR; exit
@@ -473,7 +477,6 @@ validate_no_internal_comments() {
     fi
     pass "$file_path: No forbidden internal comments."
 }
-
 
 # Rejects stacked DocBlocks before one code item.
 # @param file_path Path to the file.
@@ -810,12 +813,26 @@ kc_validate_header() {
         shell)
             bad_line=$(awk '
                 NR == 1 && /^#!/ { next }
-                NR == 2 && /^# / { next }
-                NR == 3 && /^# Summary:/ { next }
-                NR == 4 && /^# Author:/ { next }
-                NR == 5 && /^# Website:/ { next }
-                NR == 6 && /^# License:/ { next }
-                NR >= 2 && NR <= 6 { print NR; exit }
+                /^#/ {
+                    if (/^# Summary:/) { seen["Summary"] = NR; next }
+                    if (/^# Author:/) { seen["Author"] = NR; next }
+                    if (/^# Website:/) { seen["Website"] = NR; next }
+                    if (/^# License:/) { seen["License"] = NR; next }
+                    if (/^# /) { if (!seen["Title"]) seen["Title"] = NR; next }
+                    print NR; exit
+                }
+                { exit }
+                END {
+                    if (!seen["Summary"] || !seen["Author"] || !seen["Website"] || !seen["License"]) {
+                        print "missing"; exit
+                    }
+                    if (seen["Title"] && seen["Title"] > seen["Summary"]) {
+                        print seen["Title"]; exit
+                    }
+                    if (seen["Summary"] > seen["Author"] || seen["Author"] > seen["Website"] || seen["Website"] > seen["License"]) {
+                        print "order"; exit
+                    }
+                }
             ' "$file_path" || true)
             if [ -n "$bad_line" ]; then
                 fail "$file_path:$bad_line Missing or malformed KaisarCode header."
