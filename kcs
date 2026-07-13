@@ -363,6 +363,7 @@ validate_docblock_spacing() {
                     prev_blank = 1
                     next
                 }
+                /^[[:space:]]*# shellcheck/ { next }
                 /^[[:space:]]*# / {
                     if (NR > 1 && prev_blank == 0) {
                         print NR
