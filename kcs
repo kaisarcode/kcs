@@ -52,6 +52,13 @@ fail() {
     return 1
 }
 
+# Prints informational details to standard output.
+# @param message Information description.
+# @return 0 on success.
+info() {
+    printf "\033[36m[INFO]\033[0m %s\n" "$1"
+}
+
 # Prints success details to standard output.
 # @param message Success description.
 # @return 0 on success.
@@ -441,6 +448,10 @@ validate_shell_rules() {
             fail "$file_path: Shell shebang must be /bin/sh or /bin/bash."
             ;;
     esac
+    if ! command -v shellcheck >/dev/null 2>&1; then
+        info "$file_path: shellcheck not installed, skipped."
+        return 0
+    fi
     if ! shellcheck -P SCRIPTDIR -x "$file_path" >/dev/null 2>&1; then
         fail "$file_path: shellcheck validation failed."
     fi
