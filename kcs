@@ -721,16 +721,20 @@ validate_function_docblocks() {
                 return line ~ /^[[:space:]]*(if|for|while|switch|foreach|catch|elseif)[[:space:]]*\(/
             }
             function is_function_start(line) {
-                return line ~ /^[[:space:]]*[A-Za-z_][A-Za-z0-9_[:space:]\*]*\([^\)]*$/ &&
+                return line ~ /^[A-Za-z_][A-Za-z0-9_[:space:]\*]*\([^\)]*$/ &&
                     line !~ /;[[:space:]]*$/ &&
+                    line !~ /\([^)]*->/ &&
                     !is_control_line(line)
             }
             function is_function_signature(line) {
-                return line ~ /^[[:space:]]*[A-Za-z_][A-Za-z0-9_[:space:]\*]*\([^;]*\)[^;{]*$/ &&
+                return line ~ /^[A-Za-z_][A-Za-z0-9_[:space:]\*]*\([^;]*\)[^;{]*$/ &&
+                    line !~ /\)[[:space:]]*[!<>=+\-*\/%&|^?:.,)]/ &&
+                    line !~ /\([^)]*->/ &&
                     !is_control_line(line)
             }
             function is_function_single(line) {
-                return line ~ /^[[:space:]]*[A-Za-z_][A-Za-z0-9_[:space:]\*]*\([^;]*\)[^;{]*\{/ &&
+                return line ~ /^[A-Za-z_][A-Za-z0-9_[:space:]\*]*\([^;]*\)[^;{]*\{/ &&
+                    line !~ /\)[^;{]*[=!<>&|?:)+-][^;{]*\{/ &&
                     !is_control_line(line)
             }
             /^[[:space:]]*\/\*\*/ {
@@ -1023,16 +1027,21 @@ kc_validate_header() {
             ;;
         c)
             bad_line=$(awk '
-                BEGIN { in_header = 1 }
-                NR == 1 { if ($0 !~ /^[[:space:]]*\/\*\*/) { print NR; exit } next }
-                NR == 2 { if ($0 !~ /^ \* Summary:/) { print NR; exit } next }
-                NR == 3 { if ($0 !~ /^ \*$/) { print NR; exit } next }
-                NR == 4 { if ($0 !~ /^ \* Author:/) { print NR; exit } next }
-                NR == 5 { if ($0 !~ /^ \* Website:/) { print NR; exit } next }
-                NR == 6 { if ($0 !~ /^ \* License:/) { print NR; exit } next }
-                /^[[:space:]]*\*\// && NR >= 7 { in_header = 0; next }
-                in_header && NR >= 7 && $0 !~ /^ \*/ { print NR; exit }
-                END { if (in_header) print "end-of-file" }
+                NR == 1 && $0 !~ /^[[:space:]]*\/\*\*/ { print NR; exit }
+                /^[[:space:]]*\/\*\*/ {
+                    if (state > 0) { print NR; exit }
+                    state = 1
+                    next
+                }
+                state == 1 && /^ \* Summary:/ { state = 2; next }
+                state == 1 && /^ \* / { next }
+                state == 2 && /^ \*$/ { state = 3; next }
+                state == 3 && /^ \* Author:/ { state = 4; next }
+                state == 4 && /^ \* Website:/ { state = 5; next }
+                state == 5 && /^ \* License:/ { state = 6; next }
+                state == 6 && /^[[:space:]]*\*\// { state = 0; next }
+                { if (state > 0) print NR; exit }
+                END { if (state > 0) print "end-of-file" }
             ' "$file_path" || true)
             if [ -n "$bad_line" ]; then
                 fail "$file_path:$bad_line Missing or malformed KaisarCode header."
@@ -1040,20 +1049,25 @@ kc_validate_header() {
             ;;
         php)
             bad_line=$(awk '
-                BEGIN { in_header = 1; skip = 0 }
+                BEGIN { state = 0; skip = 0 }
                 NR == 1 && /^[[:space:]]*<\?php/ { skip = 1; next }
                 {
                     adj = NR - skip
-                    if (adj == 1) { if ($0 !~ /^[[:space:]]*\/\*\*/) { print NR; exit } next }
-                    if (adj == 2) { if ($0 !~ /^ \* Summary:/) { print NR; exit } next }
-                    if (adj == 3) { if ($0 !~ /^ \*$/) { print NR; exit } next }
-                    if (adj == 4) { if ($0 !~ /^ \* Author:/) { print NR; exit } next }
-                    if (adj == 5) { if ($0 !~ /^ \* Website:/) { print NR; exit } next }
-                    if (adj == 6) { if ($0 !~ /^ \* License:/) { print NR; exit } next }
-                    if ($0 ~ /^[[:space:]]*\*\// && adj >= 7) { in_header = 0; next }
-                    if (in_header && adj >= 7 && $0 !~ /^ \*/) { print NR; exit }
+                    if (adj == 1) {
+                        if ($0 !~ /^[[:space:]]*\/\*\*/) { print NR; exit }
+                        state = 1
+                        next
+                    }
                 }
-                END { if (in_header) print "end-of-file" }
+                state == 1 && /^ \* Summary:/ { state = 2; next }
+                state == 1 && /^ \* / { next }
+                state == 2 && /^ \*$/ { state = 3; next }
+                state == 3 && /^ \* Author:/ { state = 4; next }
+                state == 4 && /^ \* Website:/ { state = 5; next }
+                state == 5 && /^ \* License:/ { state = 6; next }
+                state == 6 && /^[[:space:]]*\*\// { state = 0; next }
+                { if (state > 0) print NR; exit }
+                END { if (state > 0) print "end-of-file" }
             ' "$file_path" || true)
             if [ -n "$bad_line" ]; then
                 fail "$file_path:$bad_line Missing or malformed KaisarCode header."
