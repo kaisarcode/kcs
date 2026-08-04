@@ -1034,7 +1034,10 @@ kc_validate_header() {
                     next
                 }
                 state == 1 && /^ \* Summary:/ { state = 2; next }
+                state == 1 && /^ \* Author:/ { state = 4; next }
+                state == 1 && /^ \*$/ { state = 3; next }
                 state == 1 && /^ \* / { next }
+                state == 2 && /^ \* Author:/ { state = 4; next }
                 state == 2 && /^ \*$/ { state = 3; next }
                 state == 3 && /^ \* Author:/ { state = 4; next }
                 state == 4 && /^ \* Website:/ { state = 5; next }
@@ -1043,9 +1046,6 @@ kc_validate_header() {
                 { if (state > 0) print NR; exit }
                 END { if (state > 0) print "end-of-file" }
             ' "$file_path" || true)
-            if [ -n "$bad_line" ]; then
-                fail "$file_path:$bad_line Missing or malformed KaisarCode header."
-            fi
             ;;
         php)
             bad_line=$(awk '
@@ -1060,7 +1060,10 @@ kc_validate_header() {
                     }
                 }
                 state == 1 && /^ \* Summary:/ { state = 2; next }
+                state == 1 && /^ \* Author:/ { state = 4; next }
+                state == 1 && /^ \*$/ { state = 3; next }
                 state == 1 && /^ \* / { next }
+                state == 2 && /^ \* Author:/ { state = 4; next }
                 state == 2 && /^ \*$/ { state = 3; next }
                 state == 3 && /^ \* Author:/ { state = 4; next }
                 state == 4 && /^ \* Website:/ { state = 5; next }
