@@ -1,6 +1,6 @@
 # kcs - KaisarCode Standards Validator
 
-`kcs` is a command-line tool that validates KaisarCode files against formatting and standards rules. It checks for proper indentation, absence of trailing whitespaces, valid docblocks, shell-specific rules, markdown rules, and ensures there are no forbidden internal comments.
+`kcs` is a command-line tool that validates KaisarCode files against formatting and standards rules. It checks for proper indentation, absence of trailing whitespaces, valid docblocks, shell-specific rules, markdown rules, JavaScript rules, and ensures there are no forbidden internal comments.
 
 ---
 
@@ -12,6 +12,12 @@ Validate a single shell script:
 
 ```bash
 kcs ./script.sh
+```
+
+Validate a JavaScript file:
+
+```bash
+kcs ./app.js
 ```
 
 Validate a specific file type overriding automatic detection:
@@ -39,7 +45,7 @@ kcs . -e vendor
 | Command/Flag | Description |
 | :--- | :--- |
 | `<file\|dir>...` | Validate one or more files or directories |
-| `-type <t>` | Force file type: `sh\|shell\|c\|cpp\|php\|md` |
+| `-type <t>` | Force file type: `sh\|shell\|c\|cpp\|php\|js\|md` |
 | `-e`, `--exclude <p>` | Exclude path pattern |
 | `-h`, `--help` | Show help and usage |
 

@@ -1,6 +1,6 @@
 # KaisarCode Standards (KCS)
 
-The **KaisarCode Standards (KCS)** establish the foundational rules for formatting, code organization, documentation, and architecture across the entire KaisarCode ecosystem. By adhering to these strict conventions, the ecosystem guarantees consistency, maximum composability, and readability. 
+The **KaisarCode Standards (KCS)** establish the foundational rules for formatting, code organization, documentation, and architecture across the entire KaisarCode ecosystem. By adhering to these strict conventions, the ecosystem guarantees consistency, maximum composability, and readability.
 
 These standards are natively enforced by the `kcs` validation tool.
 
@@ -36,7 +36,7 @@ These standards are natively enforced by the `kcs` validation tool.
 - **Summary:** Every DocBlock must begin with a brief summary line describing the function's behavior, not just restating the identifier name.
 - **Tags:** Every DocBlock must include a `@return` tag documenting the return value. Optional `@param` and other tags go between the summary and `@return`.
 - **Syntax:** Documentation syntax is language-specific:
-    - **C/C++ & PHP:** `/** ... */`
+    - **C/C++, PHP, JavaScript:** `/** ... */`
     - **Shell:** `# ` directly above the function
 - **Role:** Documentation is structural metadata detailing inputs, outputs, and usage, not narrative explanation.
 
@@ -53,6 +53,16 @@ These standards are natively enforced by the `kcs` validation tool.
 - **Shebangs:** Use exactly `#!/bin/sh` or `#!/bin/bash` as the shebang.
 - **Validation:** Ensure the final script passes `shellcheck -x` with zero errors or warnings.
 - **Restrictions:** `/** ... */` comments, inline explanatory comments, and executing complex logic in the main body outside of function delegation are strictly forbidden.
+
+## JavaScript Rules
+
+- **Shebangs:** Use exactly `#!/usr/bin/env qjs` (or `node`). Files are detected as JavaScript via the `.js` / `.mjs` extension or the shebang.
+- **Header:** The KaisarCode header is mandatory, with an optional shebang on the first line.
+- **Comments:** `//` and `/* ... */` internal comments are forbidden outside strings and template literals; only `/** ... */` DocBlocks are allowed.
+- **DocBlocks:** Function declarations, function and arrow assignments (`const f = (x) => ...`), and `export default` functions must be preceded by a DocBlock with a summary and `@return`. Class method DocBlocks are not enforced by the detector.
+- **Outputs:** `console.*`, `print`, and `printf` calls must not emit numbered messages or ornaments.
+- **Whitespace:** Tabs are forbidden, code indentation uses 4-space increments, and consecutive blank lines are rejected. Content inside strings and template literals is exempt.
+- **Not Applied:** shellcheck and the Markdown rules are not run on JavaScript files.
 
 ## Markdown Rules
 

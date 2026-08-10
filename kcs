@@ -14,7 +14,7 @@ kc_kcs_help() {
     echo "Usage: kcs [options] <file|dir>..."
     echo
     echo "Options:"
-    echo "  -type <t>        Force file type: sh|shell|c|cpp|php|md"
+    echo "  -type <t>        Force file type: sh|shell|c|cpp|php|js|md"
     echo "  -e, --exclude <p> Exclude path pattern"
     echo "  <file|dir>...    Validate one or more files or directories"
     echo "  -h, --help       Show help"
@@ -23,6 +23,7 @@ kc_kcs_help() {
     echo "  Shell"
     echo "  C / C++"
     echo "  PHP"
+    echo "  JavaScript"
     echo "  Markdown"
     echo
     echo "Examples:"
@@ -83,6 +84,10 @@ normalize_file_type() {
             echo "php"
             return 0
             ;;
+        js|javascript)
+            echo "js"
+            return 0
+            ;;
         md|markdown)
             echo "markdown"
             return 0
@@ -102,11 +107,15 @@ get_file_type() {
     local file="$1"
     [ -f "$file" ] && [ -r "$file" ] || return
     local sample
+    local first_line
     sample=$(head -n 5 "$file" 2>/dev/null | tr -d '\0')
-    if [[ "$sample" =~ ^#!.*(bash|sh) ]]; then echo "shell"; return; fi
+    first_line=$(printf '%s' "$sample" | awk 'NR == 1 { print; exit }')
+    if [[ "$first_line" =~ ^#!.*(bash|sh)$ ]]; then echo "shell"; return; fi
+    if [[ "$first_line" =~ ^#!.*(qjs|node)$ ]]; then echo "js"; return; fi
     case "$file" in
         *.c|*.h|*.cpp|*.hpp) echo "c" ;;
         *.php) echo "php" ;;
+        *.js|*.mjs) echo "js" ;;
         *.md) echo "markdown" ;;
         *) echo "unknown" ;;
     esac
@@ -154,6 +163,48 @@ validate_whitespace_and_limits() {
                 /^[ ]+/ {
                     match($0, /^ +/)
                     if (RLENGTH % 4 != 0) { print NR; exit }
+                }
+            ' "$file_path" || true)
+            ;;
+        js)
+            bad_line=$(awk '
+                BEGIN { sq = sprintf("%c", 39) }
+                {
+                    in_code = (in_tmpl == 0 && in_str == "" && in_doc == 0)
+                    line = $0
+                    if (in_code && line ~ /^[ ]+/) {
+                        match(line, /^ +/)
+                        if (RLENGTH % 4 != 0) { print NR; exit }
+                    }
+                    n = length(line)
+                    for (i = 1; i <= n; i++) {
+                        c = substr(line, i, 1)
+                        if (in_tmpl) {
+                            if (c == "\\") { i++; continue }
+                            if (c == "`") { in_tmpl = 0 }
+                            continue
+                        }
+                        if (in_str != "") {
+                            if (c == "\\") { i++; continue }
+                            if (c == in_str) { in_str = "" }
+                            continue
+                        }
+                        if (in_doc) {
+                            if (c == "*" && i < n && substr(line, i + 1, 1) == "/") { in_doc = 0; i++ }
+                            continue
+                        }
+                        if (c == "\"" || c == sq) { in_str = c; continue }
+                        if (c == "`") { in_tmpl = 1; continue }
+                        if (c == "/" && i < n) {
+                            nxt = substr(line, i + 1, 1)
+                            if (nxt == "*") {
+                                in_doc = 1
+                                i++
+                            } else if (nxt == "/") {
+                                break
+                            }
+                        }
+                    }
                 }
             ' "$file_path" || true)
             ;;
@@ -242,6 +293,50 @@ validate_whitespace_and_limits() {
             }
             { blank_count = 0; start_heredoc($0) }
         ' "$file_path" || true)
+    elif [ "$ftype" = "js" ]; then
+        bad_line=$(awk '
+            BEGIN { sq = sprintf("%c", 39) }
+            {
+                line = $0
+                if (line ~ /^[[:space:]]*$/) {
+                    if (in_tmpl == 0 && in_str == "" && in_doc == 0) {
+                        blank_count++
+                        if (blank_count > 1) { print NR; exit }
+                    }
+                } else {
+                    blank_count = 0
+                }
+                n = length(line)
+                for (i = 1; i <= n; i++) {
+                    c = substr(line, i, 1)
+                    if (in_tmpl) {
+                        if (c == "\\") { i++; continue }
+                        if (c == "`") { in_tmpl = 0 }
+                        continue
+                    }
+                    if (in_str != "") {
+                        if (c == "\\") { i++; continue }
+                        if (c == in_str) { in_str = "" }
+                        continue
+                    }
+                    if (in_doc) {
+                        if (c == "*" && i < n && substr(line, i + 1, 1) == "/") { in_doc = 0; i++ }
+                        continue
+                    }
+                    if (c == "\"" || c == sq) { in_str = c; continue }
+                    if (c == "`") { in_tmpl = 1; continue }
+                    if (c == "/" && i < n) {
+                        nxt = substr(line, i + 1, 1)
+                        if (nxt == "*") {
+                            in_doc = 1
+                            i++
+                        } else if (nxt == "/") {
+                            break
+                        }
+                    }
+                }
+            }
+        ' "$file_path" || true)
     else
         bad_line=$(awk '
             /^[[:space:]]*$/ {
@@ -287,7 +382,7 @@ validate_docblock_format() {
                 }
             ' "$file_path" || true)
             ;;
-        c|php)
+        c|php|js)
             bad_line=$(awk '
                 NR <= 20 { next }
                 /^[[:space:]]*\/\*\*/ {
@@ -392,7 +487,7 @@ validate_docblock_spacing() {
                 }
             ' "$file_path" || true)
             ;;
-        c|php)
+        c|php|js)
             bad_line=$(awk '
                 /^[[:space:]]*\/\*\*/ {
                     if (NR > 1 && prev_blank == 0 && !prev_preproc) {
@@ -600,6 +695,49 @@ validate_no_internal_comments() {
             }
         ' "$file_path")
         [ -n "$bad_line" ] && fail "$file_path:$bad_line Forbidden internal comment, missing summary, or missing @return."
+    elif [ "$ftype" = "js" ]; then
+        local bad_line
+        bad_line=$(awk '
+            BEGIN { sq = sprintf("%c", 39) }
+            NR <= 20 { next }
+            {
+                line = $0
+                n = length(line)
+                for (i = 1; i <= n; i++) {
+                    c = substr(line, i, 1)
+                    if (in_tmpl) {
+                        if (c == "\\") { i++; continue }
+                        if (c == "`") { in_tmpl = 0 }
+                        continue
+                    }
+                    if (in_str != "") {
+                        if (c == "\\") { i++; continue }
+                        if (c == in_str) { in_str = "" }
+                        continue
+                    }
+                    if (in_doc) {
+                        if (c == "*" && i < n && substr(line, i + 1, 1) == "/") { in_doc = 0; i++ }
+                        continue
+                    }
+                    if (c == "\"" || c == sq) { in_str = c; continue }
+                    if (c == "`") { in_tmpl = 1; continue }
+                    if (c == "/" && i < n) {
+                        nxt = substr(line, i + 1, 1)
+                        if (nxt == "/") { print NR; exit }
+                        if (nxt == "*") {
+                            if (i + 1 < n && substr(line, i + 2, 1) == "*") {
+                                in_doc = 1
+                                if (i + 2 < n && substr(line, i + 3, 1) == "/") { in_doc = 0 }
+                                i += 2
+                            } else {
+                                print NR; exit
+                            }
+                        }
+                    }
+                }
+            }
+        ' "$file_path")
+        [ -n "$bad_line" ] && fail "$file_path:$bad_line Forbidden internal comment."
     fi
     pass "$file_path: No forbidden internal comments."
 }
@@ -612,7 +750,7 @@ validate_no_duplicate_docblocks() {
     local file_path="$1"
     local ftype="$2"
     local bad_line
-    if [ "$ftype" = "c" ] || [ "$ftype" = "php" ]; then
+    if [ "$ftype" = "c" ] || [ "$ftype" = "php" ] || [ "$ftype" = "js" ]; then
         bad_line=$(awk '
             /^[[:space:]]*\/\*\*/ {
                 if (docblock_ready) {
@@ -716,26 +854,40 @@ validate_function_docblocks() {
         ' "$file_path")
         [ -n "$bad_line" ] && fail "$file_path:$bad_line Missing function DocBlock or summary."
     elif [ "$ftype" = "c" ] || [ "$ftype" = "php" ]; then
-        bad_line=$(awk '
+        local php_flag=0
+        [ "$ftype" = "php" ] && php_flag=1
+        bad_line=$(awk -v php="$php_flag" '
             function is_control_line(line) {
                 return line ~ /^[[:space:]]*(if|for|while|switch|foreach|catch|elseif)[[:space:]]*\(/
             }
+            function is_closure_arg(line) {
+                if (line !~ /function/) return 0
+                return index(line, "(") < (match(line, /(^|[^A-Za-z0-9_])function[[:space:]]*\(/) ? (RSTART == 1 ? 1 : RSTART + 1) : 0)
+            }
             function is_function_start(line) {
-                return line ~ /^[A-Za-z_][A-Za-z0-9_[:space:]\*]*\([^\)]*$/ &&
+                if (!php && line !~ /^[A-Za-z_]/) return 0
+                return line ~ /^[[:space:]]*[A-Za-z_][A-Za-z0-9_[:space:]\*]*\([^\)]*$/ &&
                     line !~ /;[[:space:]]*$/ &&
                     line !~ /\([^)]*->/ &&
                     !is_control_line(line)
             }
             function is_function_signature(line) {
-                return line ~ /^[A-Za-z_][A-Za-z0-9_[:space:]\*]*\([^;]*\)[^;{]*$/ &&
-                    line !~ /\)[[:space:]]*[!<>=+\-*\/%&|^?:.,)]/ &&
-                    line !~ /\([^)]*->/ &&
-                    !is_control_line(line)
+                if (!php && line !~ /^[A-Za-z_]/) return 0
+                return (line ~ /^[[:space:]]*[A-Za-z_][A-Za-z0-9_[:space:]\*]*\([^;]*\)[^;{]*$/ &&
+                        line !~ /\)[[:space:]]*[!<>=+\-*\/%&|^?:.,)]/ &&
+                        line !~ /\([^)]*->/ &&
+                        !is_control_line(line)) ||
+                    (line ~ /^[[:space:]]*[A-Za-z_][A-Za-z0-9_[:space:]\*]*\([^;]*\)[[:space:]]*:[[:space:]]*[A-Za-z_\\?&|\[\]0-9<>:,. ]+$/ &&
+                        line !~ /\([^)]*->/ &&
+                        !is_control_line(line))
             }
             function is_function_single(line) {
-                return line ~ /^[A-Za-z_][A-Za-z0-9_[:space:]\*]*\([^;]*\)[^;{]*\{/ &&
-                    line !~ /\)[^;{]*[=!<>&|?:)+-][^;{]*\{/ &&
-                    !is_control_line(line)
+                if (!php && line !~ /^[A-Za-z_]/) return 0
+                return (line ~ /^[[:space:]]*[A-Za-z_][A-Za-z0-9_[:space:]\*]*\([^;]*\)[^;{]*\{[[:space:]]*$/ &&
+                        line !~ /\)[^;{]*[=!<>&|?:)+-][^;{]*\{/ &&
+                        !is_control_line(line)) ||
+                    (line ~ /^[[:space:]]*[A-Za-z_][A-Za-z0-9_[:space:]\*]*\([^;]*\)[[:space:]]*:[[:space:]]*[A-Za-z_\\?&|\[\]0-9<>:,. ]+\{[[:space:]]*$/ &&
+                        !is_control_line(line))
             }
             /^[[:space:]]*\/\*\*/ {
                 in_docblock = 1
@@ -792,7 +944,7 @@ validate_function_docblocks() {
                 next
             }
             is_function_single($0) {
-                if ($0 ~ /function/ && (index($0, "(") < index($0, "function") || pending_function)) next
+                if (is_closure_arg($0) || pending_function) next
                 if ($0 ~ /^[[:space:]]*(return|throw|new|match)[[:space:]\(]/) next
                 if (!docblock_ready || !seen_return || !seen_summary) { print NR; exit }
                 docblock_ready = 0
@@ -801,13 +953,93 @@ validate_function_docblocks() {
                 next
             }
             is_function_start($0) {
+                if (is_closure_arg($0)) next
                 pending_function = 1
                 pending_line = NR
                 next
             }
             is_function_signature($0) {
+                if (is_closure_arg($0)) next
                 pending_function = 1
                 pending_line = NR
+                next
+            }
+            {
+                docblock_ready = 0
+                seen_return = 0
+                seen_summary = 0
+            }
+        ' "$file_path")
+        [ -n "$bad_line" ] && fail "$file_path:$bad_line Missing function DocBlock, summary, or @return."
+    elif [ "$ftype" = "js" ]; then
+        bad_line=$(awk '
+            BEGIN { sq = sprintf("%c", 39) }
+            function is_functionish(line) {
+                if (line ~ /(async[[:space:]]+)?function\*?[[:space:]]+[A-Za-z_$][A-Za-z0-9_$]*[[:space:]]*\(/) return 1
+                if (line ~ /(const|let|var)[[:space:]]+[A-Za-z_$][A-Za-z0-9_$]*[[:space:]]*=[[:space:]]*(async[[:space:]]+)?function[[:space:]]*\(/) return 1
+                if (line ~ /(const|let|var)[[:space:]]+[A-Za-z_$][A-Za-z0-9_$]*[[:space:]]*=[[:space:]]*(async[[:space:]]+)?(\([^;]*\)|[A-Za-z_$][A-Za-z0-9_$]*)[[:space:]]*=>/) return 1
+                if (line ~ /^[[:space:]]*(export[[:space:]]+default[[:space:]]+)?(async[[:space:]]+)?\([^;]*\)[[:space:]]*=>/) return 1
+                return 0
+            }
+            function is_complete(line) {
+                return (line ~ /[;{}]/)
+            }
+            /^[[:space:]]*\/\*\*/ {
+                in_docblock = 1
+                if ($0 ~ /@return/) {
+                    seen_return = 1
+                } else if ($0 !~ /@param/ && $0 !~ /@return/ && $0 !~ /\* (Summary:|Author:|Website:|License:|Email:|©)/ && $0 ~ /\* [A-Za-z]/) {
+                    seen_summary = 1
+                }
+                next
+            }
+            in_docblock {
+                if ($0 ~ /@return/) {
+                    seen_return = 1
+                } else if ($0 !~ /@param/ && $0 !~ /@return/ && $0 !~ /\* (Summary:|Author:|Website:|License:|Email:|©)/ && $0 ~ /\* [A-Za-z]/) {
+                    seen_summary = 1
+                }
+                if ($0 ~ /\*\//) {
+                    in_docblock = 0
+                    docblock_ready = 1
+                }
+                next
+            }
+            /^[[:space:]]*$/ {
+                docblock_ready = 0
+                seen_return = 0
+                seen_summary = 0
+                next
+            }
+            pending && /^[[:space:]]*\{/ {
+                if (!docblock_ready || !seen_return || !seen_summary) { print pending_line; exit }
+                pending = 0
+                docblock_ready = 0
+                seen_return = 0
+                seen_summary = 0
+                next
+            }
+            pending {
+                if ($0 ~ /;[[:space:]]*$/ || $0 ~ /[^;]*\{/) {
+                    if (!docblock_ready || !seen_return || !seen_summary) { print pending_line; exit }
+                    pending = 0
+                    docblock_ready = 0
+                    seen_return = 0
+                    seen_summary = 0
+                    next
+                }
+                next
+            }
+            is_functionish($0) {
+                if (is_complete($0)) {
+                    if (!docblock_ready || !seen_return || !seen_summary) { print NR; exit }
+                    docblock_ready = 0
+                    seen_return = 0
+                    seen_summary = 0
+                } else {
+                    pending = 1
+                    pending_line = NR
+                }
                 next
             }
             {
@@ -970,6 +1202,21 @@ validate_no_numbered_or_ornamented_outputs() {
                 fail "$file_path:$bad_line C/PHP prints/logs and comments must not contain numbered messages or ornaments."
             fi
             ;;
+        js)
+            bad_line=$(awk '
+                '"$AWK_HELPERS"'
+                /^[[:space:]]*\/\*/ { in_comment = 1; comment = $0; sub(/^[[:space:]]*\/\*/, "", comment); if (has_ornament(comment)) { print NR; exit } }
+                /^[[:space:]]*\*\// { in_comment = 0; comment = $0; sub(/^[[:space:]]*\*\//, "", comment); if (has_ornament(comment)) { print NR; exit } }
+                in_comment && /^[[:space:]]*\*/ { comment = $0; sub(/^[[:space:]]*\*/, "", comment); if (has_ornament(comment)) { print NR; exit } }
+                /^[[:space:]]*\/\// { comment = $0; sub(/^[[:space:]]*\/\//, "", comment); if (has_ornament(comment)) { print NR; exit } }
+                /(console\.[a-z]+|print|printf)[[:space:]]*\(/ {
+                    if (check_first_quoted_part($0)) { print NR; exit }
+                }
+            ' "$file_path")
+            if [ -n "$bad_line" ]; then
+                fail "$file_path:$bad_line JS prints/logs and comments must not contain numbered messages or ornaments."
+            fi
+            ;;
     esac
     pass "$file_path: Numbered and ornamented output rules verified."
 }
@@ -1051,6 +1298,35 @@ kc_validate_header() {
             bad_line=$(awk '
                 BEGIN { state = 0; skip = 0 }
                 NR == 1 && /^[[:space:]]*<\?php/ { skip = 1; next }
+                {
+                    adj = NR - skip
+                    if (adj == 1) {
+                        if ($0 !~ /^[[:space:]]*\/\*\*/) { print NR; exit }
+                        state = 1
+                        next
+                    }
+                }
+                state == 1 && /^ \* Summary:/ { state = 2; next }
+                state == 1 && /^ \* Author:/ { state = 4; next }
+                state == 1 && /^ \*$/ { state = 3; next }
+                state == 1 && /^ \* / { next }
+                state == 2 && /^ \* Author:/ { state = 4; next }
+                state == 2 && /^ \*$/ { state = 3; next }
+                state == 3 && /^ \* Author:/ { state = 4; next }
+                state == 4 && /^ \* Website:/ { state = 5; next }
+                state == 5 && /^ \* License:/ { state = 6; next }
+                state == 6 && /^[[:space:]]*\*\// { state = 0; next }
+                { if (state > 0) print NR; exit }
+                END { if (state > 0) print "end-of-file" }
+            ' "$file_path" || true)
+            if [ -n "$bad_line" ]; then
+                fail "$file_path:$bad_line Missing or malformed KaisarCode header."
+            fi
+            ;;
+        js)
+            bad_line=$(awk '
+                BEGIN { state = 0; skip = 0 }
+                NR == 1 && /^#!.*/ { skip = 1; next }
                 {
                     adj = NR - skip
                     if (adj == 1) {
