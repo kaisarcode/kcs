@@ -979,7 +979,7 @@ validate_function_docblocks() {
                 if (line ~ /(const|let|var)[[:space:]]+[A-Za-z_$][A-Za-z0-9_$]*[[:space:]]*=[[:space:]]*(async[[:space:]]+)?function[[:space:]]*\(/) return 1
                 if (line ~ /(const|let|var)[[:space:]]+[A-Za-z_$][A-Za-z0-9_$]*[[:space:]]*=[[:space:]]*(async[[:space:]]+)?(\([^;]*\)|[A-Za-z_$][A-Za-z0-9_$]*)[[:space:]]*=>/) return 1
                 if (line ~ /^[[:space:]]*(export[[:space:]]+default[[:space:]]+)?(async[[:space:]]+)?\([^;]*\)[[:space:]]*=>/) return 1
-                if (line ~ /^[[:space:]]*(static[[:space:]]+)?(async[[:space:]]+)?#?[A-Za-z_$][A-Za-z0-9_$]*[[:space:]]*\([^)]*\)[[:space:]]*\{/ && line !~ /^[[:space:]]*(if|for|while|switch|catch|else)[[:space:]]*\(/) return 1
+                if (line ~ /^[[:space:]]*(static[[:space:]]+)?(async[[:space:]]+)?#?[A-Za-z_$][A-Za-z0-9_$]*[[:space:]]*\([^)]*\)[[:space:]]*\{/ && line !~ /^[[:space:]]*(if|for|while|switch|catch|else)[[:space:]]*\(/ && line !~ /\([[:space:]]*function[[:space:]]*\(/) return 1
                 return 0
             }
             function is_complete(line) {
