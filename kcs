@@ -1287,13 +1287,17 @@ kc_validate_header() {
                 state == 1 && /^ \* / { next }
                 state == 2 && /^ \* Author:/ { state = 4; next }
                 state == 2 && /^ \*$/ { state = 3; next }
+                state == 2 && /^ \* / { next }
                 state == 3 && /^ \* Author:/ { state = 4; next }
                 state == 4 && /^ \* Website:/ { state = 5; next }
                 state == 5 && /^ \* License:/ { state = 6; next }
                 state == 6 && /^[[:space:]]*\*\// { state = 0; next }
-                { if (state > 0) print NR; exit }
-                END { if (state > 0) print "end-of-file" }
+                { if (state > 0) { print NR; failed = 1 } exit }
+                END { if (state > 0 && !failed) print "end-of-file" }
             ' "$file_path" || true)
+            if [ -n "$bad_line" ]; then
+                fail "$file_path:$bad_line Missing or malformed KaisarCode header."
+            fi
             ;;
         php)
             bad_line=$(awk '
