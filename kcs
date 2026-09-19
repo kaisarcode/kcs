@@ -1037,6 +1037,9 @@ validate_function_docblocks() {
                     line !~ /\([^)]*->/ &&
                     !is_control_line(line)
             }
+            function is_function_return_type(line) {
+                return line ~ /^[[:space:]]*[A-Za-z_][A-Za-z0-9_[:space:]]*\*+[[:space:]]*$/
+            }
             function is_function_signature(line) {
                 if (!php && line !~ /^[A-Za-z_]/) return 0
                 return (line ~ /^[[:space:]]*[A-Za-z_][A-Za-z0-9_[:space:]\*]*\([^;]*\)[^;{]*$/ &&
@@ -1107,6 +1110,9 @@ validate_function_docblocks() {
                     seen_summary = 0
                     next
                 }
+                next
+            }
+            docblock_ready && is_function_return_type($0) {
                 next
             }
             is_function_single($0) {
