@@ -38,6 +38,7 @@ These standards are natively enforced by the `kcs` validation tool.
 - **Syntax:** Documentation syntax is language-specific:
     - **C/C++, PHP, JavaScript:** `/** ... */`
     - **Shell:** `# ` directly above the function
+    - **Lua:** `-- ` directly above the function
 - **Role:** Documentation is structural metadata detailing inputs, outputs, and usage, not narrative explanation.
 
 ## C/C++ Rules
@@ -63,6 +64,16 @@ These standards are natively enforced by the `kcs` validation tool.
 - **Outputs:** `console.*`, `print`, and `printf` calls must not emit numbered messages or ornaments.
 - **Whitespace:** Tabs are forbidden, code indentation uses 4-space increments, and consecutive blank lines are rejected. Content inside strings and template literals is exempt.
 - **Not Applied:** shellcheck and the Markdown rules are not run on JavaScript files.
+
+## Lua Rules
+
+- **Shebangs:** Use exactly `#!/usr/bin/env lua` or `#!/usr/bin/env luajit`. Files are detected as Lua via the `.lua` extension or the shebang.
+- **Header:** The KaisarCode header is mandatory, with an optional shebang on the first line. Uses `--` comment syntax.
+- **Comments:** `--` internal comments are forbidden outside strings; only `--` DocBlocks (with `@return`) are allowed.
+- **DocBlocks:** Function declarations (`function name`), local function declarations (`local function name`), and function expressions assigned to locals (`local name = function(...)`) must be preceded by a DocBlock with a summary and `@return`.
+- **Outputs:** `print`, `printf`, and `io.write` calls must not emit numbered messages or ornaments.
+- **Whitespace:** Tabs are forbidden, code indentation uses 4-space increments, and consecutive blank lines are rejected. Content inside strings and long strings (`[[...]]`) is exempt.
+- **Not Applied:** shellcheck and the Markdown rules are not run on Lua files.
 
 ## Markdown Rules
 

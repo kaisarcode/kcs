@@ -14,7 +14,7 @@ kc_kcs_help() {
     echo "Usage: kcs [options] <file|dir>..."
     echo
     echo "Options:"
-    echo "  -type <t>        Force file type: sh|shell|c|cpp|php|js|md"
+    echo "  -type <t>        Force file type: sh|shell|c|cpp|php|js|md|lua"
     echo "  -e, --exclude <p> Exclude path pattern"
     echo "  <file|dir>...    Validate one or more files or directories"
     echo "  -h, --help       Show help"
@@ -25,6 +25,7 @@ kc_kcs_help() {
     echo "  PHP"
     echo "  JavaScript"
     echo "  Markdown"
+    echo "  Lua"
     echo
     echo "Examples:"
     echo "  kcs -type shell ./script.txt"
@@ -92,6 +93,10 @@ normalize_file_type() {
             echo "markdown"
             return 0
             ;;
+        lua)
+            echo "lua"
+            return 0
+            ;;
     esac
     return 1
 }
@@ -117,6 +122,7 @@ get_file_type() {
         *.php) echo "php" ;;
         *.js|*.mjs) echo "js" ;;
         *.md) echo "markdown" ;;
+        *.lua) echo "lua" ;;
         *) echo "unknown" ;;
     esac
 }
@@ -215,6 +221,14 @@ validate_whitespace_and_limits() {
                     next
                 }
                 in_fence { next }
+                /^[ ]+/ {
+                    match($0, /^ +/)
+                    if (RLENGTH % 4 != 0) { print NR; exit }
+                }
+            ' "$file_path" || true)
+            ;;
+        lua)
+            bad_line=$(awk '
                 /^[ ]+/ {
                     match($0, /^ +/)
                     if (RLENGTH % 4 != 0) { print NR; exit }
@@ -337,6 +351,15 @@ validate_whitespace_and_limits() {
                 }
             }
         ' "$file_path" || true)
+    elif [ "$ftype" = "lua" ]; then
+        bad_line=$(awk '
+            /^[[:space:]]*$/ {
+                blank_count++
+                if (blank_count > 1) { print NR; exit }
+                next
+            }
+            { blank_count = 0 }
+        ' "$file_path" || true)
     else
         bad_line=$(awk '
             /^[[:space:]]*$/ {
@@ -405,6 +428,26 @@ validate_docblock_format() {
                 }
                 /^[[:space:]]*#/ {
                     prev_nonblank = $0
+                    next
+                }
+                /^[[:space:]]*$/ { prev_nonblank = ""; next }
+                { prev_nonblank = $0 }
+            ' "$file_path" || true)
+            ;;
+        lua)
+            bad_line=$(awk '
+                NR <= 20 { next }
+                /^[[:space:]]*--/ {
+                    if (NR > 1 && prev_nonblank != "") {
+                        print NR
+                        exit
+                    }
+                    in_docblock = 1
+                    if (length($0) > 80) { print NR; exit }
+                    next
+                }
+                in_docblock && /^[[:space:]]*--/ {
+                    if (length($0) > 80) { print NR; exit }
                     next
                 }
                 /^[[:space:]]*$/ { prev_nonblank = ""; next }
@@ -516,6 +559,38 @@ validate_docblock_spacing() {
                 {
                     prev_blank = 0
                     prev_preproc = 0
+                }
+            ' "$file_path" || true)
+            ;;
+        lua)
+            bad_line=$(awk '
+                BEGIN { in_header = 1 }
+                NR == 1 && /^#!/ { next }
+                in_header && /^[[:space:]]*--/ { next }
+                in_header && /^[[:space:]]*$/ {
+                    in_header = 0
+                    prev_blank = 1
+                    next
+                }
+                in_header { in_header = 0 }
+                /^[[:space:]]*--/ {
+                    if (NR > 1 && prev_blank == 0) {
+                        print NR
+                        exit
+                    }
+                    in_docblock = 1
+                    next
+                }
+                in_docblock && !/^[[:space:]]*--/ {
+                    in_docblock = 0
+                    next
+                }
+                /^[[:space:]]*$/ {
+                    prev_blank = 1
+                    next
+                }
+                {
+                    prev_blank = 0
                 }
             ' "$file_path" || true)
             ;;
@@ -738,6 +813,95 @@ validate_no_internal_comments() {
             }
         ' "$file_path")
         [ -n "$bad_line" ] && fail "$file_path:$bad_line Forbidden internal comment."
+    elif [ "$ftype" = "lua" ]; then
+        local bad_line
+        bad_line=$(awk '
+            BEGIN { 
+                in_header = 1 
+                seen_summary = 0
+                seen_author = 0
+                seen_website = 0
+                seen_license = 0
+                in_docblock = 0
+                docblock_has_tags = 0
+            }
+            {
+                line = $0
+                if (in_header) {
+                    if (line ~ /^[[:space:]]*-- Summary:/) { seen_summary = 1; next }
+                    if (line ~ /^[[:space:]]*-- Author:/) { seen_author = 1; next }
+                    if (line ~ /^[[:space:]]*-- Website:/) { seen_website = 1; next }
+                    if (line ~ /^[[:space:]]*-- License:/) { seen_license = 1; next }
+                    if (line ~ /^[[:space:]]*$/) { next }
+                    if (seen_summary && seen_author && seen_website && seen_license) {
+                        # Header complete, but this could be a docblock or internal comment
+                        # Process it normally below
+                    } else if (line ~ /^[[:space:]]*-- /) {
+                        next
+                    }
+                    in_header = 0
+                }
+                if (!in_header) {
+                    is_comment = (line ~ /^[[:space:]]*--/)
+                    is_blank = (line ~ /^[[:space:]]*$/)
+                    
+                    if (is_comment) {
+                        if (line ~ /@return/ || line ~ /@param/) {
+                            in_docblock = 1
+                            docblock_has_tags = 1
+                        } else if (in_docblock) {
+                            # continue in docblock
+                        } else if (line ~ /-- [A-Za-z]/) {
+                            # potential docblock start with summary
+                            in_docblock = 1
+                            docblock_has_tags = 0
+                        } else {
+                            # comment without tags and not starting with summary
+                            print NR; exit
+                        }
+                    } else if (!is_blank) {
+                        # code line - check if we were in a docblock without tags
+                        if (in_docblock && !docblock_has_tags) {
+                            print NR - 1; exit
+                        }
+                        in_docblock = 0
+                        docblock_has_tags = 0
+                    }
+                    
+                    n = length(line)
+                    for (i = 1; i <= n; i++) {
+                        c = substr(line, i, 1)
+                        if (in_str) {
+                            if (c == "\\") { i++; continue }
+                            if (c == in_str) { in_str = "" }
+                            continue
+                        }
+                        if (in_long_str) {
+                            if (c == "]" && i < n && substr(line, i + 1, 1) == "]") { in_long_str = 0; i++ }
+                            continue
+                        }
+                        if (c == "\"" || c == "\047") { in_str = c; continue }
+                        if (c == "[" && i < n && substr(line, i + 1, 1) == "[") { in_long_str = 1; i++; continue }
+                        if (c == "-" && i < n) {
+                            nxt = substr(line, i + 1, 1)
+                            if (nxt == "-") {
+                                if (i + 1 < n && substr(line, i + 2, 1) == "[") {
+                                    if (i + 2 < n && substr(line, i + 3, 1) == "[") {
+                                        in_long_str = 1
+                                        i += 3
+                                    } else {
+                                        in_doc = 1
+                                        i += 2
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    if (in_doc && line !~ /^[[:space:]]*--/) in_doc = 0
+                }
+            }
+        ' "$file_path")
+        [ -n "$bad_line" ] && fail "$file_path:$bad_line Forbidden internal comment."
     fi
     pass "$file_path: No forbidden internal comments."
 }
@@ -750,9 +914,15 @@ validate_no_duplicate_docblocks() {
     local file_path="$1"
     local ftype="$2"
     local bad_line
-    if [ "$ftype" = "c" ] || [ "$ftype" = "php" ] || [ "$ftype" = "js" ]; then
+    if [ "$ftype" = "c" ] || [ "$ftype" = "php" ] || [ "$ftype" = "js" ] || [ "$ftype" = "lua" ]; then
         bad_line=$(awk '
-            /^[[:space:]]*\/\*\*/ {
+            in_docblock && /^[[:space:]]*--/ {
+                if ($0 ~ /Summary:|Author:|Website:|License:/) {
+                    is_header = 1
+                }
+                next
+            }
+            /^[[:space:]]*--/ {
                 if (docblock_ready) {
                     print NR
                     exit
@@ -761,19 +931,15 @@ validate_no_duplicate_docblocks() {
                 is_header = 0
                 next
             }
-            in_docblock {
-                if ($0 ~ /Summary:|Author:|Website:|License:/) {
-                    is_header = 1
-                }
-                if ($0 ~ /\*\//) {
-                    in_docblock = 0
-                    if (!is_header) {
-                        docblock_ready = 1
-                    }
+            in_docblock && !/^[[:space:]]*--/ {
+                in_docblock = 0
+                if (!is_header) {
+                    docblock_ready = 1
                 }
                 next
             }
             /^[[:space:]]*$/ {
+                in_docblock = 0
                 next
             }
             {
@@ -1050,6 +1216,49 @@ validate_function_docblocks() {
             }
         ' "$file_path")
         [ -n "$bad_line" ] && fail "$file_path:$bad_line Missing function DocBlock, summary, or @return."
+    elif [ "$ftype" = "lua" ]; then
+        bad_line=$(awk '
+            /^[[:space:]]*--/ {
+                if ($0 ~ /@return/) {
+                    seen_return = 1
+                } else if ($0 !~ /@param/ && $0 !~ /@return/ && $0 !~ /-- (Summary:|Author:|Website:|License:|Email:|©)/ && $0 ~ /-- [A-Za-z]/) {
+                    seen_summary = 1
+                }
+                in_docblock = 1
+                next
+            }
+            in_docblock && !/^[[:space:]]*--/ {
+                in_docblock = 0
+                if (seen_return && seen_summary) {
+                    docblock_ready = 1
+                }
+                seen_return = 0
+                seen_summary = 0
+            }
+            /^[[:space:]]*$/ {
+                in_docblock = 0
+                seen_return = 0
+                seen_summary = 0
+                docblock_ready = 0
+                next
+            }
+            /^function[[:space:]]+[A-Za-z_][A-Za-z0-9_]*[[:space:]]*\(/ {
+                if (!docblock_ready) { print NR; exit }
+                docblock_ready = 0
+                next
+            }
+            /^local[[:space:]]+function[[:space:]]+[A-Za-z_][A-Za-z0-9_]*[[:space:]]*\(/ {
+                if (!docblock_ready) { print NR; exit }
+                docblock_ready = 0
+                next
+            }
+            /^[A-Za-z_][A-Za-z0-9_]*[[:space:]]*=[[:space:]]*function[[:space:]]*\(/ {
+                if (!docblock_ready) { print NR; exit }
+                docblock_ready = 0
+                next
+            }
+        ' "$file_path")
+        [ -n "$bad_line" ] && fail "$file_path:$bad_line Missing function DocBlock, summary, or @return."
     fi
     pass "$file_path: Function DocBlocks verified."
 }
@@ -1218,6 +1427,22 @@ validate_no_numbered_or_ornamented_outputs() {
                 fail "$file_path:$bad_line JS prints/logs and comments must not contain numbered messages or ornaments."
             fi
             ;;
+        lua)
+            bad_line=$(awk '
+                '"$AWK_HELPERS"'
+                /^[[:space:]]*--/ {
+                    comment = $0
+                    sub(/^[[:space:]]*--/, "", comment)
+                    if (has_ornament(comment)) { print NR; exit }
+                }
+                /(print|printf|io\.write)[[:space:]]*\(/ {
+                    if (check_first_quoted_part($0)) { print NR; exit }
+                }
+            ' "$file_path")
+            if [ -n "$bad_line" ]; then
+                fail "$file_path:$bad_line Lua prints and comments must not contain numbered messages or ornaments."
+            fi
+            ;;
     esac
     pass "$file_path: Numbered and ornamented output rules verified."
 }
@@ -1352,6 +1577,34 @@ kc_validate_header() {
                 state == 6 && /^[[:space:]]*\*\// { state = 0; next }
                 { if (state > 0) print NR; exit }
                 END { if (state > 0) print "end-of-file" }
+            ' "$file_path" || true)
+            if [ -n "$bad_line" ]; then
+                fail "$file_path:$bad_line Missing or malformed KaisarCode header."
+            fi
+            ;;
+        lua)
+            bad_line=$(awk '
+                NR == 1 && /^#!/ { next }
+                /^--/ {
+                    if (/^-- Summary:/) { seen["Summary"] = NR; next }
+                    if (/^-- Author:/) { seen["Author"] = NR; next }
+                    if (/^-- Website:/) { seen["Website"] = NR; next }
+                    if (/^-- License:/) { seen["License"] = NR; next }
+                    if (/^-- /) { if (!seen["Title"]) seen["Title"] = NR; next }
+                    print NR; exit
+                }
+                { exit }
+                END {
+                    if (!seen["Summary"] || !seen["Author"] || !seen["Website"] || !seen["License"]) {
+                        print "missing"; exit
+                    }
+                    if (seen["Title"] && seen["Title"] > seen["Summary"]) {
+                        print seen["Title"]; exit
+                    }
+                    if (seen["Summary"] > seen["Author"] || seen["Author"] > seen["Website"] || seen["Website"] > seen["License"]) {
+                        print "order"; exit
+                    }
+                }
             ' "$file_path" || true)
             if [ -n "$bad_line" ]; then
                 fail "$file_path:$bad_line Missing or malformed KaisarCode header."
