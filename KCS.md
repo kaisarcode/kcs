@@ -34,7 +34,7 @@ These standards are natively enforced by the `kcs` validation tool.
 - **DocBlock Spacing:** Leave exactly one blank line before every DocBlock.
 - **Line Length:** Lines inside a DocBlock must not exceed 80 characters.
 - **Summary:** Every DocBlock must begin with a brief summary line describing the function's behavior, not just restating the identifier name.
-- **Tags:** Every DocBlock must include a `@return` tag documenting the return value. Optional `@param` and other tags go between the summary and `@return`.
+- **Tags:** Every DocBlock must include a `@return` tag documenting the return value. This is mandatory even for functions or methods with a `void` return type; use `@return void`. Optional `@param` and other tags go between the summary and `@return`.
 - **Syntax:** Documentation syntax is language-specific:
     - **C/C++, PHP, JavaScript:** `/** ... */`
     - **Shell:** `# ` directly above the function
