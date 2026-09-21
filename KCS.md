@@ -47,7 +47,7 @@ These standards are natively enforced by the `kcs` validation tool.
 - **Prefixes:** Use the `kc_` prefix for all exported/public identifiers.
 - **Filenames:** Use lowercase filenames with hyphens only. Underscores are strictly forbidden, except for files representing class names.
 - **Memory:** Keep memory management completely explicit and leak-free. Hidden ownership or implicit allocation behavior is forbidden.
-- **Signatures:** Keep multiline function signatures left-aligned with zero continuation indentation. Misaligned multiline signatures are not allowed.
+- **Signatures:** Multiline function signatures must use normal 4-space continuation indentation. Do not align continuation lines to the opening parenthesis or add arbitrary whitespace for visual alignment.
 
 ## Shell Rules
 
