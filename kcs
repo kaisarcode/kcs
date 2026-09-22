@@ -16,6 +16,7 @@ kc_kcs_help() {
     echo "Options:"
     echo "  -type <t>        Force file type: sh|shell|c|cpp|php|js|md|lua"
     echo "  -e, --exclude <p> Exclude path pattern"
+    echo "  -s, --stop        Stop on the first validation failure"
     echo "  <file|dir>...    Validate one or more files or directories"
     echo "  -h, --help       Show help"
     echo
@@ -32,6 +33,8 @@ kc_kcs_help() {
     echo "  kcs ./script.sh"
     echo "  kcs ./README.md"
     echo "  kcs ."
+    echo "  kcs -s ."
+    echo "  kcs . --stop"
     echo
     echo "Dependencies:"
     echo "  shellcheck"
@@ -51,7 +54,11 @@ kc_kcs_fail() {
 # @return 1 on failure.
 fail() {
     printf "\033[31m[FAIL]\033[0m %s\n" "$1" >&2
-    return 1
+    KC_KCS_FAILURE_COUNT=$((KC_KCS_FAILURE_COUNT + 1))
+    if [ "$KC_KCS_STOP_ON_FAILURE" -eq 1 ]; then
+        return 1
+    fi
+    return 0
 }
 
 # Prints informational details to standard output.
@@ -1656,6 +1663,7 @@ run_validator() {
                 ;;
         esac
     done
+    [ "$KC_KCS_FAILURE_COUNT" -eq 0 ]
 }
 
 # Main entry point.
@@ -1663,6 +1671,23 @@ run_validator() {
 main() {
     local force_type=""
     local excludes=()
+    local filtered_args=()
+    local arg
+
+    KC_KCS_FAILURE_COUNT=0
+    KC_KCS_STOP_ON_FAILURE=0
+
+    for arg in "$@"; do
+        case "$arg" in
+            -s|--stop)
+                KC_KCS_STOP_ON_FAILURE=1
+                ;;
+            *)
+                filtered_args+=("$arg")
+                ;;
+        esac
+    done
+    set -- "${filtered_args[@]}"
 
     if [ -f ".kcsignore" ]; then
         while IFS= read -r line || [ -n "$line" ]; do
