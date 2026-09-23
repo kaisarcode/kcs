@@ -394,11 +394,13 @@ validate_whitespace_and_limits() {
         local last_two_bytes
         last_byte=$(tail -c 1 "$file_path" | od -An -t x1 | tr -d ' \n')
         last_two_bytes=$(tail -c 2 "$file_path" | od -An -t x1 | tr -d ' \n')
-        bad_line=$(awk 'END { print NR > 0 ? NR : 1 }' "$file_path")
+        bad_line=$(wc -l < "$file_path")
         if [ "$last_byte" != "0a" ]; then
+            bad_line=$((bad_line + 1))
             fail "$file_path:$bad_line File must end with exactly one newline."
         fi
         if [ "$last_two_bytes" = "0a0a" ]; then
+            [ "$bad_line" -gt 0 ] || bad_line=1
             fail "$file_path:$bad_line File must end with exactly one newline."
         fi
     fi
