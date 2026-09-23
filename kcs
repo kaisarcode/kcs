@@ -53,12 +53,12 @@ kc_kcs_fail() {
 
 # Prints failure details to standard error.
 # @param message Error description.
-# @return 0 after reporting, unless stop-on-failure terminates validation.
+# @return 1 on failure.
 fail() {
     printf "\033[31m[FAIL]\033[0m %s\n" "$1" >&2
     KC_KCS_FAILURE_COUNT=$((KC_KCS_FAILURE_COUNT + 1))
     if [ "$KC_KCS_STOP_ON_FAILURE" -eq 1 ]; then
-        exit 1
+        return 1
     fi
     return 0
 }
@@ -67,21 +67,16 @@ fail() {
 # @param file_path Path to the validated file.
 # @param lines Newline-separated line numbers.
 # @param message Failure description.
-# @return 0 after reporting every supplied failure.
+# @return 0 after all failures, or 1 when stop-on-failure interrupts.
 fail_lines() {
     local file_path="$1"
     local lines="$2"
     local message="$3"
     local line
-    local seen_lines=" "
 
     while IFS= read -r line; do
         [ -n "$line" ] || continue
-        case "$seen_lines" in
-            *" $line "*) continue ;;
-        esac
-        seen_lines="$seen_lines$line "
-        fail "$file_path:$line $message"
+        fail "$file_path:$line $message" || return 1
     done <<< "$lines"
     return 0
 }
@@ -188,252 +183,7 @@ validate_whitespace_and_limits() {
     local ftype
     local bad_line
     ftype=$(get_file_type "$file_path")
-    bad_line=$(grep -n )
-    if [ -n "$bad_line" ]; then
-        fail_lines "$file_path" "$bad_line" "Tabs are forbidden."
-    fi
-    case "$ftype" in
-        c|php)
-            bad_line=$(awk '
-                /^[[:space:]]*\/\*\*/ {
-                    in_docblock = 1
-                    next
-                }
-                in_docblock {
-                    if (/\*\//) {
-                        in_docblock = 0
-                    }
-                    next
-                }
-                /^[ ]+/ {
-                    match($0, /^ +/)
-                    if (RLENGTH % 4 != 0) { print NR }
-                }
-            ' "$file_path" || true)
-            ;;
-        js)
-            bad_line=$(awk '
-                BEGIN { sq = sprintf("%c", 39) }
-                {
-                    in_code = (in_tmpl == 0 && in_str == "" && in_doc == 0)
-                    line = $0
-                    if (in_code && line ~ /^[ ]+/) {
-                        match(line, /^ +/)
-                        if (RLENGTH % 4 != 0) { print NR }
-                    }
-                    n = length(line)
-                    for (i = 1; i <= n; i++) {
-                        c = substr(line, i, 1)
-                        if (in_tmpl) {
-                            if (c == "\\") { i++; continue }
-                            if (c == "`") { in_tmpl = 0 }
-                            continue
-                        }
-                        if (in_str != "") {
-                            if (c == "\\") { i++; continue }
-                            if (c == in_str) { in_str = "" }
-                            continue
-                        }
-                        if (in_doc) {
-                            if (c == "*" && i < n && substr(line, i + 1, 1) == "/") { in_doc = 0; i++ }
-                            continue
-                        }
-                        if (c == "\"" || c == sq) { in_str = c; continue }
-                        if (c == "`") { in_tmpl = 1; continue }
-                        if (c == "/" && i < n) {
-                            nxt = substr(line, i + 1, 1)
-                            if (nxt == "*") {
-                                in_doc = 1
-                                i++
-                            } else if (nxt == "/") {
-                                break
-                            }
-                        }
-                    }
-                }
-            ' "$file_path" || true)
-            ;;
-        markdown)
-            bad_line=$(awk '
-                /^```/ {
-                    in_fence = !in_fence
-                    next
-                }
-                in_fence { next }
-                /^[ ]+/ {
-                    match($0, /^ +/)
-                    if (RLENGTH % 4 != 0) { print NR }
-                }
-            ' "$file_path" || true)
-            ;;
-        lua)
-            bad_line=$(awk '
-                /^[ ]+/ {
-                    match($0, /^ +/)
-                    if (RLENGTH % 4 != 0) { print NR }
-                }
-            ' "$file_path" || true)
-            ;;
-        *)
-            bad_line=$(awk '
-                function start_heredoc(line,    rest, quote, squote) {
-                    if (line !~ /<<-?/) return 0
-                    rest = line
-                    sub(/^.*<<-?/, "", rest)
-                    sub(/^[[:space:]]*/, "", rest)
-                    squote = sprintf("%c", 39)
-                    quote = substr(rest, 1, 1)
-                    if (quote == "\"" || quote == squote) {
-                        rest = substr(rest, 2)
-                        sub(quote ".*$", "", rest)
-                        heredoc = rest
-                        return 1
-                    }
-                    if (match(rest, /^[A-Za-z_][A-Za-z0-9_]*/)) {
-                        heredoc = substr(rest, RSTART, RLENGTH)
-                        return 1
-                    }
-                    return 0
-                }
-                heredoc {
-                    end = $0
-                    sub(/^[[:space:]]*/, "", end)
-                    if (end == heredoc) heredoc = ""
-                    next
-                }
-                /^[ ]+/ {
-                    match($0, /^ +/)
-                    if (RLENGTH % 4 != 0) { print NR }
-                }
-                { start_heredoc($0) }
-            ' "$file_path" || true)
-            ;;
-    esac
-    if [ -n "$bad_line" ]; then
-        fail_lines "$file_path" "$bad_line" "Indentation must use 4-space increments."
-    fi
-    if [ "$ftype" = "shell" ]; then
-        bad_line=$(awk '
-            function start_heredoc(line,    rest, quote, squote) {
-                if (line !~ /<<-?/) return 0
-                rest = line
-                sub(/^.*<<-?/, "", rest)
-                sub(/^[[:space:]]*/, "", rest)
-                squote = sprintf("%c", 39)
-                quote = substr(rest, 1, 1)
-                if (quote == "\"" || quote == squote) {
-                    rest = substr(rest, 2)
-                    sub(quote ".*$", "", rest)
-                    heredoc = rest
-                    return 1
-                }
-                if (match(rest, /^[A-Za-z_][A-Za-z0-9_]*/)) {
-                    heredoc = substr(rest, RSTART, RLENGTH)
-                    return 1
-                }
-                return 0
-            }
-            heredoc {
-                end = $0
-                sub(/^[[:space:]]*/, "", end)
-                if (end == heredoc) heredoc = ""
-                next
-            }
-            /^[[:space:]]*$/ {
-                blank_count++
-                if (blank_count > 1) { print NR }
-                next
-            }
-            { blank_count = 0; start_heredoc($0) }
-        ' "$file_path" || true)
-    elif [ "$ftype" = "js" ]; then
-        bad_line=$(awk '
-            BEGIN { sq = sprintf("%c", 39) }
-            {
-                line = $0
-                if (line ~ /^[[:space:]]*$/) {
-                    if (in_tmpl == 0 && in_str == "" && in_doc == 0) {
-                        blank_count++
-                        if (blank_count > 1) { print NR }
-                    }
-                } else {
-                    blank_count = 0
-                }
-                n = length(line)
-                for (i = 1; i <= n; i++) {
-                    c = substr(line, i, 1)
-                    if (in_tmpl) {
-                        if (c == "\\") { i++; continue }
-                        if (c == "`") { in_tmpl = 0 }
-                        continue
-                    }
-                    if (in_str != "") {
-                        if (c == "\\") { i++; continue }
-                        if (c == in_str) { in_str = "" }
-                        continue
-                    }
-                    if (in_doc) {
-                        if (c == "*" && i < n && substr(line, i + 1, 1) == "/") { in_doc = 0; i++ }
-                        continue
-                    }
-                    if (c == "\"" || c == sq) { in_str = c; continue }
-                    if (c == "`") { in_tmpl = 1; continue }
-                    if (c == "/" && i < n) {
-                        nxt = substr(line, i + 1, 1)
-                        if (nxt == "*") {
-                            in_doc = 1
-                            i++
-                        } else if (nxt == "/") {
-                            break
-                        }
-                    }
-                }
-            }
-        ' "$file_path" || true)
-    elif [ "$ftype" = "lua" ]; then
-        bad_line=$(awk '
-            /^[[:space:]]*$/ {
-                blank_count++
-                if (blank_count > 1) { print NR }
-                next
-            }
-            { blank_count = 0 }
-        ' "$file_path" || true)
-    else
-        bad_line=$(awk '
-            /^[[:space:]]*$/ {
-                blank_count++
-                if (blank_count > 1) { print NR }
-                next
-            }
-            { blank_count = 0 }
-        ' "$file_path" || true)
-    fi
-    if [ -n "$bad_line" ]; then
-        fail_lines "$file_path" "$bad_line" "Multiple consecutive blank lines are forbidden."
-    fi
-    if [ -s "$file_path" ]; then
-        local last_byte
-        local last_two_bytes
-        last_byte=$(tail -c 1 "$file_path" | od -An -t x1 | tr -d ' \n')
-        last_two_bytes=$(tail -c 2 "$file_path" | od -An -t x1 | tr -d ' \n')
-        bad_line=$(wc -l < "$file_path")
-        if [ "$last_byte" != "0a" ]; then
-            bad_line=$((bad_line + 1))
-            fail "$file_path:$bad_line File must end with exactly one newline."
-        fi
-        if [ "$last_two_bytes" = "0a0a" ]; then
-            [ "$bad_line" -gt 0 ] || bad_line=1
-            fail "$file_path:$bad_line File must end with exactly one newline."
-        fi
-    fi
-    pass "$file_path: Whitespace verified."
-}
-
-# Ensures DocBlock lines do not exceed 80 chars.
-# @param file_path Path to the file.
-# @return 0 on success, fails otherwise.
-\t' "$file_path" | cut -d: -f1 || true)
+    bad_line=$(grep -n $'\t' "$file_path" | head -n 1 | cut -d: -f1 || true)
     if [ -n "$bad_line" ]; then
         fail "$file_path:$bad_line Tabs are forbidden."
     fi
@@ -452,7 +202,7 @@ validate_whitespace_and_limits() {
                 }
                 /^[ ]+/ {
                     match($0, /^ +/)
-                    if (RLENGTH % 4 != 0) { print NR }
+                    if (RLENGTH % 4 != 0) { print NR; exit }
                 }
             ' "$file_path" || true)
             ;;
@@ -464,7 +214,7 @@ validate_whitespace_and_limits() {
                     line = $0
                     if (in_code && line ~ /^[ ]+/) {
                         match(line, /^ +/)
-                        if (RLENGTH % 4 != 0) { print NR }
+                        if (RLENGTH % 4 != 0) { print NR; exit }
                     }
                     n = length(line)
                     for (i = 1; i <= n; i++) {
@@ -507,7 +257,7 @@ validate_whitespace_and_limits() {
                 in_fence { next }
                 /^[ ]+/ {
                     match($0, /^ +/)
-                    if (RLENGTH % 4 != 0) { print NR }
+                    if (RLENGTH % 4 != 0) { print NR; exit }
                 }
             ' "$file_path" || true)
             ;;
@@ -515,7 +265,7 @@ validate_whitespace_and_limits() {
             bad_line=$(awk '
                 /^[ ]+/ {
                     match($0, /^ +/)
-                    if (RLENGTH % 4 != 0) { print NR }
+                    if (RLENGTH % 4 != 0) { print NR; exit }
                 }
             ' "$file_path" || true)
             ;;
@@ -548,7 +298,7 @@ validate_whitespace_and_limits() {
                 }
                 /^[ ]+/ {
                     match($0, /^ +/)
-                    if (RLENGTH % 4 != 0) { print NR }
+                    if (RLENGTH % 4 != 0) { print NR; exit }
                 }
                 { start_heredoc($0) }
             ' "$file_path" || true)
@@ -586,7 +336,7 @@ validate_whitespace_and_limits() {
             }
             /^[[:space:]]*$/ {
                 blank_count++
-                if (blank_count > 1) { print NR }
+                if (blank_count > 1) { print NR; exit }
                 next
             }
             { blank_count = 0; start_heredoc($0) }
@@ -599,7 +349,7 @@ validate_whitespace_and_limits() {
                 if (line ~ /^[[:space:]]*$/) {
                     if (in_tmpl == 0 && in_str == "" && in_doc == 0) {
                         blank_count++
-                        if (blank_count > 1) { print NR }
+                        if (blank_count > 1) { print NR; exit }
                     }
                 } else {
                     blank_count = 0
@@ -639,7 +389,7 @@ validate_whitespace_and_limits() {
         bad_line=$(awk '
             /^[[:space:]]*$/ {
                 blank_count++
-                if (blank_count > 1) { print NR }
+                if (blank_count > 1) { print NR; exit }
                 next
             }
             { blank_count = 0 }
@@ -648,7 +398,7 @@ validate_whitespace_and_limits() {
         bad_line=$(awk '
             /^[[:space:]]*$/ {
                 blank_count++
-                if (blank_count > 1) { print NR }
+                if (blank_count > 1) { print NR; exit }
                 next
             }
             { blank_count = 0 }
@@ -688,7 +438,7 @@ validate_docblock_format() {
             bad_line=$(awk '
                 NR <= 20 { next }
                 /^[[:space:]]*# / {
-                    if (length($0) > 80) { print NR }
+                    if (length($0) > 80) { print NR; exit }
                 }
             ' "$file_path" || true)
             ;;
@@ -698,9 +448,10 @@ validate_docblock_format() {
                 /^[[:space:]]*\/\*\*/ {
                     if (NR > 1 && prev_nonblank != "" && prev_nonblank !~ /^[[:space:]]*#/) {
                         print NR
+                        exit
                     }
                     in_docblock = 1
-                    if (length($0) > 80) { print NR }
+                    if (length($0) > 80) { print NR; exit }
                     next
                 }
                 in_docblock && /\*\// {
@@ -709,7 +460,7 @@ validate_docblock_format() {
                     next
                 }
                 in_docblock && /^[[:space:]]*\*/ {
-                    if (length($0) > 80) { print NR }
+                    if (length($0) > 80) { print NR; exit }
                     next
                 }
                 /^[[:space:]]*#/ {
@@ -726,13 +477,14 @@ validate_docblock_format() {
                 /^[[:space:]]*--/ {
                     if (NR > 1 && prev_nonblank != "") {
                         print NR
+                        exit
                     }
                     in_docblock = 1
-                    if (length($0) > 80) { print NR }
+                    if (length($0) > 80) { print NR; exit }
                     next
                 }
                 in_docblock && /^[[:space:]]*--/ {
-                    if (length($0) > 80) { print NR }
+                    if (length($0) > 80) { print NR; exit }
                     next
                 }
                 /^[[:space:]]*$/ { prev_nonblank = ""; next }
@@ -744,7 +496,7 @@ validate_docblock_format() {
             ;;
     esac
     if [ -n "$bad_line" ]; then
-        fail_lines "$file_path" "$bad_line" "DocBlock exceeds 80 chars."
+        fail "$file_path:$bad_line DocBlock exceeds 80 chars."
     fi
     pass "$file_path: DocBlock format verified."
 }
@@ -797,6 +549,7 @@ validate_docblock_spacing() {
                 /^[[:space:]]*# / {
                     if (NR > 1 && prev_blank == 0) {
                         print NR
+                        exit
                     }
                     in_docblock = 1
                     next
@@ -819,6 +572,7 @@ validate_docblock_spacing() {
                 /^[[:space:]]*\/\*\*/ {
                     if (NR > 1 && prev_blank == 0 && !prev_preproc) {
                         print NR
+                        exit
                     }
                     in_docblock = 1
                     next
@@ -859,6 +613,7 @@ validate_docblock_spacing() {
                 /^[[:space:]]*--/ {
                     if (NR > 1 && prev_blank == 0) {
                         print NR
+                        exit
                     }
                     in_docblock = 1
                     next
@@ -881,7 +636,7 @@ validate_docblock_spacing() {
             ;;
     esac
     if [ -n "$bad_line" ]; then
-        fail_lines "$file_path" "$bad_line" "Missing blank line before DocBlock."
+        fail "$file_path:$bad_line Missing blank line before DocBlock."
     fi
     pass "$file_path: DocBlock spacing verified."
 }
@@ -985,7 +740,7 @@ validate_no_internal_comments() {
             in_header { in_header = 0 }
             $0 ~ "^"h {
                 if (!in_docblock && $0 !~ "^"h" ([*@]|shellcheck|Summary:|Author:|Website:|License:|Email:|©|[a-z0-9_-]+ -|"s"|[A-Za-z].*)") {
-                    print NR
+                    print NR; exit
                 }
                 if ($0 ~ "^"h" shellcheck") {
                     next
@@ -994,18 +749,18 @@ validate_no_internal_comments() {
                 if ($0 !~ /@param/ && $0 !~ /@return/ && $0 !~ "^"h" (shellcheck|Summary:|Author:|Website:|License:|Email:|©|[a-z0-9_-]+ -)" && $0 ~ "^"h" [A-Za-z]") seen_summary = 1
                 in_docblock = 1; next
             }
-            $0 !~ /^[[:space:]]*#/ && index($0, s h) { print NR }
+            $0 !~ /^[[:space:]]*#/ && index($0, s h) { print NR; exit }
             /^[[:space:]]*$/ { in_docblock = 0; seen_return = 0; seen_summary = 0 }
             /^[a-z_][a-z0-9_]*[ ]*\(\)/ {
-                if (in_docblock && (!seen_return || !seen_summary)) { print NR }
+                if (in_docblock && (!seen_return || !seen_summary)) { print NR; exit }
                 in_docblock = 0; seen_return = 0; seen_summary = 0
             }
             { start_heredoc($0) }
             in_docblock {
-                print NR
+                print NR; exit
             }
         ' "$file_path")
-        [ -n "$bad_line" ] && fail_lines "$file_path" "$bad_line" "Forbidden internal comment, missing summary, or missing @return."
+        [ -n "$bad_line" ] && fail "$file_path:$bad_line Forbidden internal comment, missing summary, or missing @return."
     elif [ "$ftype" = "c" ]; then
         local bad_line
         bad_line=$(awk -v sl="/" -v as="*" '
@@ -1048,10 +803,10 @@ validate_no_internal_comments() {
             }
             index(scan, sl sl sl) { next }
             index(scan, sl sl) {
-                if (NR > 20) { print NR }
+                if (NR > 20) { print NR; exit }
             }
             index(scan, sl as) && scan !~ /^[[:space:]]*\/\*\*/ {
-                print NR
+                print NR; exit
             }
             scan ~ /^[[:space:]]*\/\*\*/ { in_docblock = 1 }
             in_docblock && /@return/ { seen_return = 1 }
@@ -1062,11 +817,11 @@ validate_no_internal_comments() {
             }
             closing_line && NR == closing_line + 1 {
                 is_func = ($0 ~ /^[A-Za-z_][A-Za-z0-9_[:space:]\*]*\([^\)]*[;\{]?/ && $0 !~ /typedef/)
-                if ((!seen_return || !seen_summary) && is_func) { print NR - 1 }
+                if ((!seen_return || !seen_summary) && is_func) { print NR - 1; exit }
                 in_docblock = 0; seen_return = 0; seen_summary = 0; closing_line = 0
             }
         ' "$file_path")
-        [ -n "$bad_line" ] && fail_lines "$file_path" "$bad_line" "Forbidden internal comment, missing summary, or missing @return."
+        [ -n "$bad_line" ] && fail "$file_path:$bad_line Forbidden internal comment, missing summary, or missing @return."
     elif [ "$ftype" = "js" ]; then
         local bad_line
         bad_line=$(awk '
@@ -1095,22 +850,21 @@ validate_no_internal_comments() {
                     if (c == "`") { in_tmpl = 1; continue }
                     if (c == "/" && i < n) {
                         nxt = substr(line, i + 1, 1)
-                        if (nxt == "/") { print NR }
+                        if (nxt == "/") { print NR; exit }
                         if (nxt == "*") {
                             if (i + 1 < n && substr(line, i + 2, 1) == "*") {
                                 in_doc = 1
                                 if (i + 2 < n && substr(line, i + 3, 1) == "/") { in_doc = 0 }
                                 i += 2
                             } else {
-                                print NR
-                                break
+                                print NR; exit
                             }
                         }
                     }
                 }
             }
         ' "$file_path")
-        [ -n "$bad_line" ] && fail_lines "$file_path" "$bad_line" "Forbidden internal comment."
+        [ -n "$bad_line" ] && fail "$file_path:$bad_line Forbidden internal comment."
     elif [ "$ftype" = "lua" ]; then
         local bad_line
         bad_line=$(awk '
@@ -1155,12 +909,12 @@ validate_no_internal_comments() {
                             docblock_has_tags = 0
                         } else {
                             # comment without tags and not starting with summary
-                            print NR
+                            print NR; exit
                         }
                     } else if (!is_blank) {
                         # code line - check if we were in a docblock without tags
                         if (in_docblock && !docblock_has_tags) {
-                            print NR - 1
+                            print NR - 1; exit
                         }
                         in_docblock = 0
                         docblock_has_tags = 0
@@ -1199,7 +953,7 @@ validate_no_internal_comments() {
                 }
             }
         ' "$file_path")
-        [ -n "$bad_line" ] && fail_lines "$file_path" "$bad_line" "Forbidden internal comment."
+        [ -n "$bad_line" ] && fail "$file_path:$bad_line Forbidden internal comment."
     fi
     pass "$file_path: No forbidden internal comments."
 }
@@ -1223,6 +977,7 @@ validate_no_duplicate_docblocks() {
             /^[[:space:]]*--/ {
                 if (docblock_ready) {
                     print NR
+                    exit
                 }
                 in_docblock = 1
                 is_header = 0
@@ -1243,7 +998,7 @@ validate_no_duplicate_docblocks() {
                 docblock_ready = 0
             }
         ' "$file_path")
-        [ -n "$bad_line" ] && fail_lines "$file_path" "$bad_line" "Duplicate DocBlock."
+        [ -n "$bad_line" ] && fail "$file_path:$bad_line Duplicate DocBlock."
     fi
     pass "$file_path: Duplicate DocBlocks verified."
 }
@@ -1651,12 +1406,12 @@ validate_no_numbered_or_ornamented_outputs() {
                 /^[[:space:]]*#+[[:space:]]+/ {
                     heading = $0
                     sub(/^[[:space:]]*#+[[:space:]]+/, "", heading)
-                    if (heading ~ /^[0-9]+[\.\)]/) { print NR }
-                    if (has_ornament(heading)) { print NR }
+                    if (heading ~ /^[0-9]+[\.\)]/) { print NR; exit }
+                    if (has_ornament(heading)) { print NR; exit }
                 }
             ' "$file_path")
             if [ -n "$bad_line" ]; then
-                fail_lines "$file_path" "$bad_line" "Headings must not be numbered or contain ornaments."
+                fail "$file_path:$bad_line Headings must not be numbered or contain ornaments."
             fi
             ;;
         shell)
@@ -1690,48 +1445,48 @@ validate_no_numbered_or_ornamented_outputs() {
                 /^[[:space:]]*#/ {
                     comment = $0
                     sub(/^[[:space:]]*#/, "", comment)
-                    if (has_ornament(comment)) { print NR }
+                    if (has_ornament(comment)) { print NR; exit }
                 }
                 /^[[:space:]]*(echo|printf|log_[a-z0-9_]+|kc_log_[a-z0-9_]+)[[:space:]]+/ {
-                    if (check_first_quoted_part($0)) { print NR }
+                    if (check_first_quoted_part($0)) { print NR; exit }
                 }
                 { start_heredoc($0) }
             ' "$file_path")
             if [ -n "$bad_line" ]; then
-                fail_lines "$file_path" "$bad_line" "Print/echo statements and comments must not contain numbered messages or ornaments."
+                fail "$file_path:$bad_line Print/echo statements and comments must not contain numbered messages or ornaments."
             fi
             ;;
         c|php)
             bad_line=$(awk '
                 '"$AWK_HELPERS"'
-                /^[[:space:]]*\/\*/ { in_comment = 1; comment = $0; sub(/^[[:space:]]*\/\*/, "", comment); if (has_ornament(comment)) { print NR } }
-                /^[[:space:]]*\*\// { in_comment = 0; comment = $0; sub(/^[[:space:]]*\*\//, "", comment); if (has_ornament(comment)) { print NR } }
-                in_comment && /^[[:space:]]*\*/ { comment = $0; sub(/^[[:space:]]*\*/, "", comment); if (has_ornament(comment)) { print NR } }
-                /^[[:space:]]*\/\// { comment = $0; sub(/^[[:space:]]*\/\//, "", comment); if (has_ornament(comment)) { print NR } }
+                /^[[:space:]]*\/\*/ { in_comment = 1; comment = $0; sub(/^[[:space:]]*\/\*/, "", comment); if (has_ornament(comment)) { print NR; exit } }
+                /^[[:space:]]*\*\// { in_comment = 0; comment = $0; sub(/^[[:space:]]*\*\//, "", comment); if (has_ornament(comment)) { print NR; exit } }
+                in_comment && /^[[:space:]]*\*/ { comment = $0; sub(/^[[:space:]]*\*/, "", comment); if (has_ornament(comment)) { print NR; exit } }
+                /^[[:space:]]*\/\// { comment = $0; sub(/^[[:space:]]*\/\//, "", comment); if (has_ornament(comment)) { print NR; exit } }
                 /(printf|fprintf|sprintf|snprintf|kc_log|log_[a-z0-9_]+|echo)[[:space:]]*\(/ {
-                    if (check_first_quoted_part($0)) { print NR }
+                    if (check_first_quoted_part($0)) { print NR; exit }
                 }
                 /^[[:space:]]*echo[[:space:]]+/ {
-                    if (check_first_quoted_part($0)) { print NR }
+                    if (check_first_quoted_part($0)) { print NR; exit }
                 }
             ' "$file_path")
             if [ -n "$bad_line" ]; then
-                fail_lines "$file_path" "$bad_line" "C/PHP prints/logs and comments must not contain numbered messages or ornaments."
+                fail "$file_path:$bad_line C/PHP prints/logs and comments must not contain numbered messages or ornaments."
             fi
             ;;
         js)
             bad_line=$(awk '
                 '"$AWK_HELPERS"'
-                /^[[:space:]]*\/\*/ { in_comment = 1; comment = $0; sub(/^[[:space:]]*\/\*/, "", comment); if (has_ornament(comment)) { print NR } }
-                /^[[:space:]]*\*\// { in_comment = 0; comment = $0; sub(/^[[:space:]]*\*\//, "", comment); if (has_ornament(comment)) { print NR } }
-                in_comment && /^[[:space:]]*\*/ { comment = $0; sub(/^[[:space:]]*\*/, "", comment); if (has_ornament(comment)) { print NR } }
-                /^[[:space:]]*\/\// { comment = $0; sub(/^[[:space:]]*\/\//, "", comment); if (has_ornament(comment)) { print NR } }
+                /^[[:space:]]*\/\*/ { in_comment = 1; comment = $0; sub(/^[[:space:]]*\/\*/, "", comment); if (has_ornament(comment)) { print NR; exit } }
+                /^[[:space:]]*\*\// { in_comment = 0; comment = $0; sub(/^[[:space:]]*\*\//, "", comment); if (has_ornament(comment)) { print NR; exit } }
+                in_comment && /^[[:space:]]*\*/ { comment = $0; sub(/^[[:space:]]*\*/, "", comment); if (has_ornament(comment)) { print NR; exit } }
+                /^[[:space:]]*\/\// { comment = $0; sub(/^[[:space:]]*\/\//, "", comment); if (has_ornament(comment)) { print NR; exit } }
                 /(console\.[a-z]+|print|printf)[[:space:]]*\(/ {
-                    if (check_first_quoted_part($0)) { print NR }
+                    if (check_first_quoted_part($0)) { print NR; exit }
                 }
             ' "$file_path")
             if [ -n "$bad_line" ]; then
-                fail_lines "$file_path" "$bad_line" "JS prints/logs and comments must not contain numbered messages or ornaments."
+                fail "$file_path:$bad_line JS prints/logs and comments must not contain numbered messages or ornaments."
             fi
             ;;
         lua)
@@ -1740,14 +1495,14 @@ validate_no_numbered_or_ornamented_outputs() {
                 /^[[:space:]]*--/ {
                     comment = $0
                     sub(/^[[:space:]]*--/, "", comment)
-                    if (has_ornament(comment)) { print NR }
+                    if (has_ornament(comment)) { print NR; exit }
                 }
                 /(print|printf|io\.write)[[:space:]]*\(/ {
-                    if (check_first_quoted_part($0)) { print NR }
+                    if (check_first_quoted_part($0)) { print NR; exit }
                 }
             ' "$file_path")
             if [ -n "$bad_line" ]; then
-                fail_lines "$file_path" "$bad_line" "Lua prints and comments must not contain numbered messages or ornaments."
+                fail "$file_path:$bad_line Lua prints and comments must not contain numbered messages or ornaments."
             fi
             ;;
     esac
@@ -1761,18 +1516,7 @@ validate_no_numbered_or_ornamented_outputs() {
 validate_no_em_dash() {
     local file_path="$1"
     local bad_line
-    bad_line=$(grep -n )
-    if [ -n "$bad_line" ]; then
-        fail_lines "$file_path" "$bad_line" "Em dash character is forbidden; use hyphen \"-\" instead."
-    fi
-    pass "$file_path: No em dash characters."
-}
-
-# Validates that files begin with the KaisarCode header block.
-# @param file_path Path to the file.
-# @param ftype File type identified.
-# @return 0 on success, fails otherwise.
-\xe2\x80\x94' "$file_path" | cut -d: -f1 || true)
+    bad_line=$(grep -n $'\xe2\x80\x94' "$file_path" | head -n 1 | cut -d: -f1 || true)
     if [ -n "$bad_line" ]; then
         fail "$file_path:$bad_line Em dash character is forbidden; use hyphen \"-\" instead."
     fi
