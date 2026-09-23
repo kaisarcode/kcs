@@ -67,7 +67,7 @@ fail() {
 # @param file_path Path to the validated file.
 # @param lines Newline-separated line numbers.
 # @param message Failure description.
-# @return 0 after all failures, or 1 when stop-on-failure interrupts.
+# @return 0 after reporting every supplied failure.
 fail_lines() {
     local file_path="$1"
     local lines="$2"
