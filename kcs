@@ -63,13 +63,11 @@ fail() {
     return 0
 }
 
-/**
- * Reports every line returned by one validator scan.
- * @param file_path Path to the validated file.
- * @param lines Newline-separated line numbers.
- * @param message Failure description.
- * @return 0 after all failures, or 1 when stop-on-failure interrupts.
- */
+# Reports every line returned by one validator scan.
+# @param file_path Path to the validated file.
+# @param lines Newline-separated line numbers.
+# @param message Failure description.
+# @return 0 after all failures, or 1 when stop-on-failure interrupts.
 fail_lines() {
     local file_path="$1"
     local lines="$2"
