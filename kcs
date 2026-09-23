@@ -63,6 +63,26 @@ fail() {
     return 0
 }
 
+/**
+ * Reports every line returned by one validator scan.
+ * @param file_path Path to the validated file.
+ * @param lines Newline-separated line numbers.
+ * @param message Failure description.
+ * @return 0 after all failures, or 1 when stop-on-failure interrupts.
+ */
+fail_lines() {
+    local file_path="$1"
+    local lines="$2"
+    local message="$3"
+    local line
+
+    while IFS= read -r line; do
+        [ -n "$line" ] || continue
+        fail "$file_path:$line $message" || return 1
+    done <<< "$lines"
+    return 0
+}
+
 # Prints informational details to standard output.
 # @param message Information description.
 # @return 0 on success.
@@ -1039,7 +1059,7 @@ validate_function_docblocks() {
                 next
             }
             /^[a-z_][a-z0-9_]*[[:space:]]*\(\)[[:space:]]*\{/ {
-                if (!in_docblock || !seen_return || !seen_summary) { print NR; exit }
+                if (!in_docblock || !seen_return || !seen_summary) { print NR }
                 in_docblock = 0
                 seen_return = 0
                 seen_summary = 0
@@ -1052,7 +1072,8 @@ validate_function_docblocks() {
                 start_heredoc($0)
             }
         ' "$file_path")
-        [ -n "$bad_line" ] && fail "$file_path:$bad_line Missing function DocBlock or summary."
+        [ -n "$bad_line" ] && fail_lines "$file_path" "$bad_line" \
+            "Missing function DocBlock or summary."
     elif [ "$ftype" = "c" ] || [ "$ftype" = "php" ]; then
         local php_flag=0
         [ "$ftype" = "php" ] && php_flag=1
@@ -1121,7 +1142,7 @@ validate_function_docblocks() {
             }
             /^[[:space:]]*#/ { next }
             pending_function && /^[[:space:]]*\{/ {
-                if (!docblock_ready || !seen_return || !seen_summary) { print pending_line; exit }
+                if (!docblock_ready || !seen_return || !seen_summary) { print pending_line }
                 pending_function = 0
                 docblock_ready = 0
                 seen_return = 0
@@ -1137,7 +1158,7 @@ validate_function_docblocks() {
                     next
                 }
                 if ($0 ~ /\)[^;{]*\{/) {
-                    if (!docblock_ready || !seen_return || !seen_summary) { print pending_line; exit }
+                    if (!docblock_ready || !seen_return || !seen_summary) { print pending_line }
                     pending_function = 0
                     docblock_ready = 0
                     seen_return = 0
@@ -1152,7 +1173,7 @@ validate_function_docblocks() {
             is_function_single($0) {
                 if (is_closure_arg($0) || pending_function) next
                 if ($0 ~ /^[[:space:]]*(return|throw|new|match)[[:space:]\(]/) next
-                if (!docblock_ready || !seen_return || !seen_summary) { print NR; exit }
+                if (!docblock_ready || !seen_return || !seen_summary) { print NR }
                 docblock_ready = 0
                 seen_return = 0
                 seen_summary = 0
@@ -1176,7 +1197,8 @@ validate_function_docblocks() {
                 seen_summary = 0
             }
         ' "$file_path")
-        [ -n "$bad_line" ] && fail "$file_path:$bad_line Missing function DocBlock, summary, or @return."
+        [ -n "$bad_line" ] && fail_lines "$file_path" "$bad_line" \
+            "Missing function DocBlock, summary, or @return."
     elif [ "$ftype" = "js" ]; then
         bad_line=$(awk '
             BEGIN { sq = sprintf("%c", 39) }
@@ -1219,7 +1241,7 @@ validate_function_docblocks() {
                 next
             }
             pending && /^[[:space:]]*\{/ {
-                if (!docblock_ready || !seen_return || !seen_summary) { print pending_line; exit }
+                if (!docblock_ready || !seen_return || !seen_summary) { print pending_line }
                 pending = 0
                 docblock_ready = 0
                 seen_return = 0
@@ -1228,7 +1250,7 @@ validate_function_docblocks() {
             }
             pending {
                 if ($0 ~ /;[[:space:]]*$/ || $0 ~ /[^;]*\{/) {
-                    if (!docblock_ready || !seen_return || !seen_summary) { print pending_line; exit }
+                    if (!docblock_ready || !seen_return || !seen_summary) { print pending_line }
                     pending = 0
                     docblock_ready = 0
                     seen_return = 0
@@ -1239,7 +1261,7 @@ validate_function_docblocks() {
             }
             is_functionish($0) {
                 if (is_complete($0)) {
-                    if (!docblock_ready || !seen_return || !seen_summary) { print NR; exit }
+                    if (!docblock_ready || !seen_return || !seen_summary) { print NR }
                     docblock_ready = 0
                     seen_return = 0
                     seen_summary = 0
@@ -1255,7 +1277,8 @@ validate_function_docblocks() {
                 seen_summary = 0
             }
         ' "$file_path")
-        [ -n "$bad_line" ] && fail "$file_path:$bad_line Missing function DocBlock, summary, or @return."
+        [ -n "$bad_line" ] && fail_lines "$file_path" "$bad_line" \
+            "Missing function DocBlock, summary, or @return."
     elif [ "$ftype" = "lua" ]; then
         bad_line=$(awk '
             /^[[:space:]]*--/ {
@@ -1283,22 +1306,23 @@ validate_function_docblocks() {
                 next
             }
             /^function[[:space:]]+[A-Za-z_][A-Za-z0-9_]*[[:space:]]*\(/ {
-                if (!docblock_ready) { print NR; exit }
+                if (!docblock_ready) { print NR }
                 docblock_ready = 0
                 next
             }
             /^local[[:space:]]+function[[:space:]]+[A-Za-z_][A-Za-z0-9_]*[[:space:]]*\(/ {
-                if (!docblock_ready) { print NR; exit }
+                if (!docblock_ready) { print NR }
                 docblock_ready = 0
                 next
             }
             /^[A-Za-z_][A-Za-z0-9_]*[[:space:]]*=[[:space:]]*function[[:space:]]*\(/ {
-                if (!docblock_ready) { print NR; exit }
+                if (!docblock_ready) { print NR }
                 docblock_ready = 0
                 next
             }
         ' "$file_path")
-        [ -n "$bad_line" ] && fail "$file_path:$bad_line Missing function DocBlock, summary, or @return."
+        [ -n "$bad_line" ] && fail_lines "$file_path" "$bad_line" \
+            "Missing function DocBlock, summary, or @return."
     fi
     pass "$file_path: Function DocBlocks verified."
 }
