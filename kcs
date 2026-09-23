@@ -17,6 +17,7 @@ kc_kcs_help() {
     echo "  -type <t>        Force file type: sh|shell|c|cpp|php|js|md|lua"
     echo "  -e, --exclude <p> Exclude path pattern"
     echo "  -s, --stop        Stop on the first validation failure"
+    echo "  -p, --pass        Show successful validation checks"
     echo "  <file|dir>...    Validate one or more files or directories"
     echo "  -h, --help       Show help"
     echo
@@ -34,6 +35,7 @@ kc_kcs_help() {
     echo "  kcs ./README.md"
     echo "  kcs ."
     echo "  kcs -s ."
+    echo "  kcs -p ."
     echo "  kcs . --stop"
     echo
     echo "Dependencies:"
@@ -65,14 +67,18 @@ fail() {
 # @param message Information description.
 # @return 0 on success.
 info() {
-    printf "\033[36m[INFO]\033[0m %s\n" "$1"
+    if [ "$KC_KCS_SHOW_PASS" -eq 1 ]; then
+        printf "\033[36m[INFO]\033[0m %s\n" "$1"
+    fi
 }
 
 # Prints success details to standard output.
 # @param message Success description.
 # @return 0 on success.
 pass() {
-    printf "\033[32m[PASS]\033[0m %s\n" "$1"
+    if [ "$KC_KCS_SHOW_PASS" -eq 1 ]; then
+        printf "\033[32m[PASS]\033[0m %s\n" "$1"
+    fi
 }
 
 # Normalizes one CLI file type alias into the internal type name.
@@ -147,7 +153,7 @@ validate_filename() {
         return 0
     fi
     if [[ "$name" == *"_"* ]]; then
-        fail "$file_path: Filename must use hyphens '-' instead of underscores '_' to separate words."
+        fail "$file_path:1 Filename must use hyphens '-' instead of underscores '_' to separate words."
     fi
 }
 
@@ -159,7 +165,10 @@ validate_whitespace_and_limits() {
     local ftype
     local bad_line
     ftype=$(get_file_type "$file_path")
-    if grep -q $'\t' "$file_path"; then fail "$file_path: Tabs are forbidden."; fi
+    bad_line=$(grep -n $'\t' "$file_path" | head -n 1 | cut -d: -f1 || true)
+    if [ -n "$bad_line" ]; then
+        fail "$file_path:$bad_line Tabs are forbidden."
+    fi
     case "$ftype" in
         c|php)
             bad_line=$(awk '
@@ -385,11 +394,12 @@ validate_whitespace_and_limits() {
         local last_two_bytes
         last_byte=$(tail -c 1 "$file_path" | od -An -t x1 | tr -d ' \n')
         last_two_bytes=$(tail -c 2 "$file_path" | od -An -t x1 | tr -d ' \n')
+        bad_line=$(awk 'END { print NR > 0 ? NR : 1 }' "$file_path")
         if [ "$last_byte" != "0a" ]; then
-            fail "$file_path: File must end with exactly one newline."
+            fail "$file_path:$bad_line File must end with exactly one newline."
         fi
         if [ "$last_two_bytes" = "0a0a" ]; then
-            fail "$file_path: File must end with exactly one newline."
+            fail "$file_path:$bad_line File must end with exactly one newline."
         fi
     fi
     pass "$file_path: Whitespace verified."
@@ -622,15 +632,21 @@ validate_shell_rules() {
         '#!/bin/sh'|'#!/bin/bash')
             ;;
         *)
-            fail "$file_path: Shell shebang must be /bin/sh or /bin/bash."
+            fail "$file_path:1 Shell shebang must be /bin/sh or /bin/bash."
             ;;
     esac
     if ! command -v shellcheck >/dev/null 2>&1; then
         info "$file_path: shellcheck not installed, skipped."
         return 0
     fi
-    if ! shellcheck -P SCRIPTDIR -x "$file_path" >/dev/null 2>&1; then
-        fail "$file_path: shellcheck validation failed."
+    local shellcheck_output
+    local shellcheck_line
+    if ! shellcheck_output=$(shellcheck -P SCRIPTDIR -x -f gcc "$file_path" 2>&1); then
+        shellcheck_line=$(printf '%s\n' "$shellcheck_output" | awk -F: '
+            NR == 1 && $2 ~ /^[0-9]+$/ { print $2; exit }
+        ')
+        [ -n "$shellcheck_line" ] || shellcheck_line=1
+        fail "$file_path:$shellcheck_line shellcheck validation failed."
     fi
     pass "$file_path: Shell rules verified."
 }
@@ -641,14 +657,23 @@ validate_shell_rules() {
 validate_markdown_rules() {
     local file_path="$1"
     local h1_count
-    h1_count=$(awk '
+    local bad_line
+    local h1_data
+    h1_data=$(awk '
         /^```/ { in_fence = !in_fence; next }
         in_fence { next }
-        /^# / { count++ }
-        END { print count + 0 }
+        /^# / {
+            count++
+            if (count == 2 && extra == 0) extra = NR
+        }
+        END {
+            if (count == 0) extra = 1
+            print count + 0, extra + 0
+        }
     ' "$file_path")
+    read -r h1_count bad_line <<< "$h1_data"
     if [ "$h1_count" -ne 1 ]; then
-        fail "$file_path: Markdown files must contain exactly one H1."
+        fail "$file_path:$bad_line Markdown files must contain exactly one H1."
     fi
     pass "$file_path: Markdown rules verified."
 }
@@ -1508,6 +1533,7 @@ kc_validate_header() {
                 }
             ' "$file_path" || true)
             if [ -n "$bad_line" ]; then
+                [[ "$bad_line" =~ ^[0-9]+$ ]] || bad_line=1
                 fail "$file_path:$bad_line Missing or malformed KaisarCode header."
             fi
             ;;
@@ -1534,6 +1560,7 @@ kc_validate_header() {
                 END { if (state > 0 && !failed) print "end-of-file" }
             ' "$file_path" || true)
             if [ -n "$bad_line" ]; then
+                [[ "$bad_line" =~ ^[0-9]+$ ]] || bad_line=1
                 fail "$file_path:$bad_line Missing or malformed KaisarCode header."
             fi
             ;;
@@ -1563,6 +1590,7 @@ kc_validate_header() {
                 END { if (state > 0) print "end-of-file" }
             ' "$file_path" || true)
             if [ -n "$bad_line" ]; then
+                [[ "$bad_line" =~ ^[0-9]+$ ]] || bad_line=1
                 fail "$file_path:$bad_line Missing or malformed KaisarCode header."
             fi
             ;;
@@ -1592,6 +1620,7 @@ kc_validate_header() {
                 END { if (state > 0) print "end-of-file" }
             ' "$file_path" || true)
             if [ -n "$bad_line" ]; then
+                [[ "$bad_line" =~ ^[0-9]+$ ]] || bad_line=1
                 fail "$file_path:$bad_line Missing or malformed KaisarCode header."
             fi
             ;;
@@ -1620,6 +1649,7 @@ kc_validate_header() {
                 }
             ' "$file_path" || true)
             if [ -n "$bad_line" ]; then
+                [[ "$bad_line" =~ ^[0-9]+$ ]] || bad_line=1
                 fail "$file_path:$bad_line Missing or malformed KaisarCode header."
             fi
             ;;
@@ -1676,11 +1706,15 @@ main() {
 
     KC_KCS_FAILURE_COUNT=0
     KC_KCS_STOP_ON_FAILURE=0
+    KC_KCS_SHOW_PASS=0
 
     for arg in "$@"; do
         case "$arg" in
             -s|--stop)
                 KC_KCS_STOP_ON_FAILURE=1
+                ;;
+            -p|--pass)
+                KC_KCS_SHOW_PASS=1
                 ;;
             *)
                 filtered_args+=("$arg")
@@ -1724,7 +1758,11 @@ main() {
     [ "$#" -gt 0 ] || set -- "."
     export KC_KCS_FORCE_TYPE="$force_type"
     KC_KCS_EXCLUDES=("${excludes[@]}")
-    run_validator "$@"
+    if run_validator "$@"; then
+        printf "OK\n"
+        return 0
+    fi
+    return 1
 }
 
 main "$@"
