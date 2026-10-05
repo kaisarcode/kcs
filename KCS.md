@@ -9,7 +9,7 @@ These standards are natively enforced by the `kcs` validation tool.
 ## Structure & Style
 
 - **Language:** All content (code, comments, docs) must be written in English.
-- **Indentation:** Use 4-space indentation exclusively. Tabs are forbidden.
+- **Indentation:** Use 4-space indentation exclusively. Tabs must not be used for indentation. Tabs used as content or data separators are allowed.
 - **Alignment:** Do not use alignment-based formatting or artificial whitespace padding.
 - **Blank Lines:** Do not leave consecutive blank lines.
 - **File Endings:** All files must end with exactly one newline.
@@ -62,7 +62,7 @@ These standards are natively enforced by the `kcs` validation tool.
 - **Comments:** `//` and `/* ... */` internal comments are forbidden outside strings and template literals; only `/** ... */` DocBlocks are allowed.
 - **DocBlocks:** Function declarations, function and arrow assignments (`const f = (x) => ...`), and `export default` functions must be preceded by a DocBlock with a summary and `@return`. Class method DocBlocks are not enforced by the detector.
 - **Outputs:** `console.*`, `print`, and `printf` calls must not emit numbered messages or ornaments.
-- **Whitespace:** Tabs are forbidden, code indentation uses 4-space increments, and consecutive blank lines are rejected. Content inside strings and template literals is exempt.
+- **Whitespace:** Tabs must not be used for indentation, code indentation uses 4-space increments, and consecutive blank lines are rejected. Tabs inside content, strings, and template literals are allowed.
 - **Not Applied:** shellcheck and the Markdown rules are not run on JavaScript files.
 
 ## Lua Rules
@@ -72,7 +72,7 @@ These standards are natively enforced by the `kcs` validation tool.
 - **Comments:** `--` internal comments are forbidden outside strings; only `--` DocBlocks (with `@return`) are allowed.
 - **DocBlocks:** Function declarations (`function name`), local function declarations (`local function name`), and function expressions assigned to locals (`local name = function(...)`) must be preceded by a DocBlock with a summary and `@return`.
 - **Outputs:** `print`, `printf`, and `io.write` calls must not emit numbered messages or ornaments.
-- **Whitespace:** Tabs are forbidden, code indentation uses 4-space increments, and consecutive blank lines are rejected. Content inside strings and long strings (`[[...]]`) is exempt.
+- **Whitespace:** Tabs must not be used for indentation, code indentation uses 4-space increments, and consecutive blank lines are rejected. Tabs inside content, strings, and long strings (`[[...]]`) are allowed.
 - **Not Applied:** shellcheck and the Markdown rules are not run on Lua files.
 
 ## Markdown Rules
