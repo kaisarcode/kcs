@@ -188,9 +188,9 @@ validate_whitespace_and_limits() {
     local ftype
     local bad_line
     ftype=$(get_file_type "$file_path")
-    bad_line=$(grep -n $'\t' "$file_path" | cut -d: -f1 || true)
+    bad_line=$(grep -n $'^[ ]*\t' "$file_path" | cut -d: -f1 || true)
     if [ -n "$bad_line" ]; then
-        fail_lines "$file_path" "$bad_line" "Tabs are forbidden."
+        fail_lines "$file_path" "$bad_line" "Tabs are forbidden for indentation."
     fi
     case "$ftype" in
         c|php)
@@ -823,7 +823,6 @@ validate_no_internal_comments() {
         ' "$file_path")
         [ -n "$bad_line" ] && fail_lines "$file_path" "$bad_line" "Forbidden internal comment, missing summary, or missing @return."
     elif [ "$ftype" = "js" ]; then
-        local bad_line
         bad_line=$(awk '
             BEGIN { sq = sprintf("%c", 39) }
             NR <= 20 { next }
