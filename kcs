@@ -1274,6 +1274,59 @@ validate_function_docblocks() {
                 bad_line=$(printf '%s\n%s\n' "$bad_line" "$php_bad_line" |
                     sort -nu)
             fi
+            php_bad_line=$(awk '
+                function is_async_function(line) {
+                    return line ~ /async[[:space:]]+function\*?[[:space:]]+[A-Za-z_$][A-Za-z0-9_$]*[[:space:]]*\(/
+                }
+                /^[[:space:]]*<script([[:space:]][^>]*)?>/ { in_script = 1; next }
+                !in_script { next }
+                /^[[:space:]]*<\/script>/ {
+                    in_script = 0
+                    in_docblock = 0
+                    docblock_ready = 0
+                    seen_return = 0
+                    seen_summary = 0
+                    next
+                }
+                /^[[:space:]]*\/\*\*/ {
+                    in_docblock = ($0 !~ /\*\//)
+                    seen_return = ($0 ~ /@return/)
+                    seen_summary = ($0 !~ /@(param|return)/ && $0 ~ /\* [A-Za-z]/)
+                    docblock_ready = !in_docblock && seen_return && seen_summary
+                    next
+                }
+                in_docblock {
+                    if ($0 ~ /@return/) seen_return = 1
+                    else if ($0 !~ /@(param|return)/ && $0 ~ /\* [A-Za-z]/) seen_summary = 1
+                    if ($0 ~ /\*\//) {
+                        in_docblock = 0
+                        docblock_ready = seen_return && seen_summary
+                    }
+                    next
+                }
+                /^[[:space:]]*$/ {
+                    docblock_ready = 0
+                    seen_return = 0
+                    seen_summary = 0
+                    next
+                }
+                is_async_function($0) {
+                    if (!docblock_ready) print NR
+                    docblock_ready = 0
+                    seen_return = 0
+                    seen_summary = 0
+                    next
+                }
+                {
+                    docblock_ready = 0
+                    seen_return = 0
+                    seen_summary = 0
+                }
+            ' "$file_path")
+            if [ -n "$php_bad_line" ]; then
+                bad_line=$(printf '%s\n%s\n' "$bad_line" "$php_bad_line" |
+                    sort -nu)
+            fi
         fi
         [ -n "$bad_line" ] && fail_lines "$file_path" "$bad_line" \
             "Missing function DocBlock, summary, or @return."
@@ -1292,12 +1345,12 @@ validate_function_docblocks() {
                 return (line ~ /[;{}]/)
             }
             /^[[:space:]]*\/\*\*/ {
-                in_docblock = 1
-                if ($0 ~ /@return/) {
-                    seen_return = 1
-                } else if ($0 !~ /@param/ && $0 !~ /@return/ && $0 !~ /\* (Summary:|Author:|Website:|License:|Email:|©)/ && $0 ~ /\* [A-Za-z]/) {
-                    seen_summary = 1
-                }
+                in_docblock = ($0 !~ /\*\//)
+                seen_return = ($0 ~ /@return/)
+                seen_summary = ($0 !~ /@param/ && $0 !~ /@return/ &&
+                    $0 !~ /\* (Summary:|Author:|Website:|License:|Email:|©)/ &&
+                    $0 ~ /\* [A-Za-z]/)
+                docblock_ready = !in_docblock && seen_return && seen_summary
                 next
             }
             in_docblock {
